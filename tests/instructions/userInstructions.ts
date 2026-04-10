@@ -307,6 +307,8 @@ export async function swapPartialFill(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      ipworldState: deriveIpworldStateAddress(),
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(
       [
@@ -452,6 +454,8 @@ export async function swap(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      ipworldState: deriveIpworldStateAddress(),
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts(
       [
@@ -578,6 +582,8 @@ export async function getSwap2Instruction(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      ipworldState: deriveIpworldStateAddress(),
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts([
       {
@@ -661,6 +667,8 @@ export async function getSwapInstruction(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      ipworldState: deriveIpworldStateAddress(),
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .remainingAccounts([
       {
@@ -773,6 +781,8 @@ export async function swap2(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      ipworldState: deriveIpworldStateAddress(),
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .preInstructions(preInstructions)
     .postInstructions(postInstructions)
@@ -894,6 +904,8 @@ export async function swapSimulate(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      ipworldState: deriveIpworldStateAddress(),
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .transaction();
 

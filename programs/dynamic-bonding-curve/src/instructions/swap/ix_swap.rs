@@ -26,6 +26,9 @@ use anchor_lang::solana_program::instruction::{
 };
 use anchor_lang::solana_program::sysvar;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+use crate::state::IpworldState;
+use crate::state::auth_structs::TradeAuth;
+use crate::utils::verify_authority_sig::verify_authority_sig;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 // only be use for swap exact in
@@ -113,6 +116,19 @@ pub struct SwapCtx<'info> {
     /// referral token account
     #[account(mut)]
     pub referral_token_account: Option<Box<InterfaceAccount<'info, TokenAccount>>>,
+
+    // --- ipworld trade auth accounts (Step 7) ---
+
+    /// IpworldState PDA — holds the authority pubkey we verify the Ed25519 signature against
+    #[account(
+        seeds = [b"ipworld_state"],
+        bump = ipworld_state.bump,
+    )]
+    pub ipworld_state: Account<'info, IpworldState>,
+
+    /// CHECK: Instructions sysvar — needed to introspect the Ed25519 verify ix
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    pub instructions_sysvar: AccountInfo<'info>,
 }
 
 impl<'info> SwapCtx<'info> {
@@ -129,6 +145,24 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
     ctx: Context<'_, '_, 'c, 'info, SwapCtx<'info>>,
     params: SwapParameters2,
 ) -> Result<()> {
+    // --- Step 7: Verify backend-signed TradeAuth ---
+    #[cfg(not(feature = "skip-trade-auth"))]
+    {
+        let trade_auth: TradeAuth = verify_authority_sig(
+            &ctx.accounts.instructions_sysvar,
+            &ctx.accounts.ipworld_state,
+        )?;
+        require!(
+            trade_auth.user == ctx.accounts.payer.key(),
+            PoolError::UnauthorizedTrade
+        );
+        let clock = Clock::get()?;
+        require!(
+            trade_auth.expires_at > clock.unix_timestamp,
+            PoolError::TradeAuthExpired
+        );
+    }
+
     let SwapParameters2 {
         amount_0,
         amount_1,

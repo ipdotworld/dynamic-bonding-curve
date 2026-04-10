@@ -212,6 +212,12 @@ pub enum PoolError {
 
     #[msg("Launch not authorized by ipworld backend")]
     UnauthorizedLaunch,
+
+    #[msg("Trade not authorized by ipworld backend")]
+    UnauthorizedTrade,
+
+    #[msg("Trade authorization has expired")]
+    TradeAuthExpired,
 }
 
 impl From<ProtozolZapError> for PoolError {
