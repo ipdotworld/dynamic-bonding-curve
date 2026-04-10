@@ -5,6 +5,7 @@ import {
   DAMM_PROGRAM_ID,
   DAMM_V2_PROGRAM_ID,
   DYNAMIC_BONDING_CURVE_PROGRAM_ID,
+  IPWORLD_HOOK_PROGRAM_ID,
   METAPLEX_PROGRAM_ID,
   VAULT_PROGRAM_ID,
 } from "./constants";
@@ -207,5 +208,21 @@ export function deriveMigrationDammV2MetadataAddress(
   return PublicKey.findProgramAddressSync(
     [Buffer.from("damm_v2"), virtual_pool.toBuffer()],
     DYNAMIC_BONDING_CURVE_PROGRAM_ID
+  )[0];
+}
+
+// --- ipworld hook PDAs ---
+
+export function deriveHookConfigAddress(mint: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("hook_config"), mint.toBuffer()],
+    IPWORLD_HOOK_PROGRAM_ID
+  )[0];
+}
+
+export function deriveExtraAccountMetaListAddress(mint: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("extra-account-metas"), mint.toBuffer()],
+    IPWORLD_HOOK_PROGRAM_ID
   )[0];
 }

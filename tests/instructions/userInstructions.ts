@@ -25,11 +25,14 @@ import {
   wrapSOLInstruction,
 } from "../utils";
 import {
+  deriveExtraAccountMetaListAddress,
+  deriveHookConfigAddress,
   deriveMetadataAccount,
   derivePoolAddress,
   derivePoolAuthority,
   deriveTokenVaultAddress,
 } from "../utils/accounts";
+import { IPWORLD_HOOK_PROGRAM_ID } from "../utils/constants";
 import {
   getConfig,
   getVirtualPool,
@@ -137,6 +140,9 @@ export async function createPoolWithToken2022(
   const pool = derivePoolAddress(config, baseMintKP.publicKey, quoteMint);
   const baseVault = deriveTokenVaultAddress(baseMintKP.publicKey, pool);
   const quoteVault = deriveTokenVaultAddress(quoteMint, pool);
+  const hookConfig = deriveHookConfigAddress(baseMintKP.publicKey);
+  const extraAccountMetaList = deriveExtraAccountMetaListAddress(baseMintKP.publicKey);
+
   const transaction = await program.methods
     .initializeVirtualPoolWithToken2022(instructionParams)
     .accountsPartial({
@@ -151,6 +157,9 @@ export async function createPoolWithToken2022(
       quoteVault,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       tokenProgram: TOKEN_2022_PROGRAM_ID,
+      ipworldHookProgram: IPWORLD_HOOK_PROGRAM_ID,
+      hookConfig,
+      extraAccountMetaList,
     })
     .transaction();
 

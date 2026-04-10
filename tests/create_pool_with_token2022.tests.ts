@@ -4,6 +4,7 @@ import {
   ExtensionType,
   getExtensionData,
   NATIVE_MINT,
+  getExtensionTypes,
 } from "@solana/spl-token";
 import { unpack } from "@solana/spl-token-metadata";
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
@@ -36,6 +37,12 @@ import {
 } from "./utils";
 import { getVirtualPool } from "./utils/fetcher";
 import { Pool, VirtualCurveProgram } from "./utils/types";
+import {
+  deriveHookConfigAddress,
+  deriveExtraAccountMetaListAddress,
+  derivePoolAuthority,
+} from "./utils/accounts";
+import { IPWORLD_HOOK_PROGRAM_ID } from "./utils/constants";
 
 describe("Create pool with token2022", () => {
   let svm: LiteSVM;
@@ -195,6 +202,57 @@ describe("Create pool with token2022", () => {
       PublicKey.default.toString()
     );
     expect(baseMintData.mintAuthorityOption).eq(0);
+  });
+
+  it("Mint has TransferHook extension with correct program ID", () => {
+    const mintData = svm.getAccount(virtualPoolState.baseMint).data;
+    const tlvData = mintData.slice(ACCOUNT_SIZE + ACCOUNT_TYPE_SIZE);
+
+    // Check TransferHook extension exists
+    const hookData = getExtensionData(
+      ExtensionType.TransferHook,
+      Buffer.from(tlvData)
+    );
+    expect(hookData).to.not.be.null;
+
+    // TransferHook extension data: authority (32 bytes) + program_id (32 bytes)
+    const hookAuthority = new PublicKey(hookData!.slice(0, 32));
+    const hookProgramId = new PublicKey(hookData!.slice(32, 64));
+    const poolAuthority = derivePoolAuthority();
+
+    expect(hookProgramId.toBase58()).to.equal(
+      IPWORLD_HOOK_PROGRAM_ID.toBase58(),
+      "Hook program ID should be ipworld-hook"
+    );
+    expect(hookAuthority.toBase58()).to.equal(
+      poolAuthority.toBase58(),
+      "Hook authority should be pool_authority (for graduation removal)"
+    );
+    console.log("    ✅ TransferHook extension present with correct program ID and authority");
+  });
+
+  it("ExtraAccountMetaList PDA was created", () => {
+    const metaListPDA = deriveExtraAccountMetaListAddress(virtualPoolState.baseMint);
+    const account = svm.getAccount(metaListPDA);
+    expect(account).to.not.be.null;
+    expect(account.data.length).to.be.greaterThan(0);
+    console.log("    ✅ ExtraAccountMetaList PDA exists with data");
+  });
+
+  it("HookConfig PDA was created with correct vault", () => {
+    const hookConfigPDA = deriveHookConfigAddress(virtualPoolState.baseMint);
+    const account = svm.getAccount(hookConfigPDA);
+    expect(account).to.not.be.null;
+
+    // HookConfig layout: 8 (discriminator) + 32 (pool_vault) + 1 (bump)
+    const data = Buffer.from(account.data);
+    expect(data.length).to.equal(41);
+    const poolVault = new PublicKey(data.slice(8, 40));
+    expect(poolVault.toBase58()).to.equal(
+      virtualPoolState.baseVault.toBase58(),
+      "HookConfig pool_vault should match the pool's base_vault"
+    );
+    console.log("    ✅ HookConfig PDA exists with correct pool_vault");
   });
 
   it("Swap", async () => {

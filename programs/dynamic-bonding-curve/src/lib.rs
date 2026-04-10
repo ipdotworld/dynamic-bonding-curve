@@ -30,6 +30,20 @@ pub mod params;
 
 declare_id!("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
 
+/// ipworld-hook program ID — used for CPI and account validation.
+/// Uses a constant Pubkey instead of declare_id! to prevent Anchor's
+/// IDL builder from picking it up as DBC's program address.
+pub mod ipworld_hook {
+    use anchor_lang::prelude::Pubkey;
+    pub static ID: Pubkey = Pubkey::new_from_array([
+        // HooK1111111111111111111111111111111111111111
+        0xf9, 0xb8, 0x12, 0x41, 0x90, 0x51, 0x5b, 0x1f,
+        0x17, 0xc7, 0x4e, 0x27, 0x1a, 0xcf, 0x36, 0xd9,
+        0xf9, 0x8d, 0xb1, 0xb5, 0xd2, 0x78, 0x63, 0x7f,
+        0x28, 0xee, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ]);
+}
+
 #[program]
 pub mod dynamic_bonding_curve {
     use super::*;

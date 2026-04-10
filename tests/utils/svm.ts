@@ -8,6 +8,7 @@ import {
   DAMM_V2_PROGRAM_ID,
   DYNAMIC_BONDING_CURVE_PROGRAM_ID,
   FLASH_RENT_FUND,
+  IPWORLD_HOOK_PROGRAM_ID,
   JUPITER_V6_PROGRAM_ID,
   LOCKER_PROGRAM_ID,
   METAPLEX_PROGRAM_ID,
@@ -36,6 +37,11 @@ export function startSvm() {
   svm.addProgramFromFile(METAPLEX_PROGRAM_ID, sourceFileMetaplexPath);
   svm.addProgramFromFile(ZAP_PROGRAM_ID, sourceFileZapProgramPath);
   svm.addProgramFromFile(JUPITER_V6_PROGRAM_ID, sourceFileJupiterPath);
+
+  const sourceFileHookPath = path.resolve(
+    "./target/deploy/ipworld_hook.so"
+  );
+  svm.addProgramFromFile(IPWORLD_HOOK_PROGRAM_ID, sourceFileHookPath);
 
   // set wrap sol mint account
   svm.setAccount(NATIVE_MINT, {

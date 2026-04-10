@@ -21,6 +21,10 @@ export const DAMM_V2_PROGRAM_ID = new PublicKey(
   "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
 );
 
+export const IPWORLD_HOOK_PROGRAM_ID = new PublicKey(
+  "HooK1111111111111111111111111111111111111111"
+);
+
 export const TREASURY = new PublicKey(
   "6aYhxiNGmG8AyU25rh2R7iFu4pBrqnQHpNUGhmsEXRcm"
 );

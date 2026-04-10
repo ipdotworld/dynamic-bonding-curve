@@ -14,6 +14,8 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::SECONDS_PER_DAY;
+use anchor_lang::solana_program::instruction::AccountMeta;
+use crate::ipworld_hook;
 use anchor_spl::token_2022::spl_token_2022::instruction::AuthorityType;
 use anchor_spl::token_interface::spl_pod::optional_keys::OptionalNonZeroPubkey;
 use anchor_spl::{
@@ -49,6 +51,8 @@ pub struct InitializeVirtualPoolWithToken2022Ctx<'info> {
         mint::authority = pool_authority,
         extensions::metadata_pointer::authority = pool_authority,
         extensions::metadata_pointer::metadata_address = base_mint,
+        extensions::transfer_hook::authority = pool_authority,
+        extensions::transfer_hook::program_id = ipworld_hook_program,
     )]
     pub base_mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -114,6 +118,20 @@ pub struct InitializeVirtualPoolWithToken2022Ctx<'info> {
     pub token_program: Program<'info, Token2022>,
     // Sysvar for program account
     pub system_program: Program<'info, System>,
+
+    // --- ipworld hook accounts ---
+
+    /// CHECK: ipworld-hook program for transfer hook CPIs
+    #[account(address = ipworld_hook::ID)]
+    pub ipworld_hook_program: AccountInfo<'info>,
+
+    /// CHECK: HookConfig PDA [b"hook_config", base_mint] — created by CPI
+    #[account(mut)]
+    pub hook_config: AccountInfo<'info>,
+
+    /// CHECK: ExtraAccountMetaList PDA [b"extra-account-metas", base_mint] — created by CPI
+    #[account(mut)]
+    pub extra_account_meta_list: AccountInfo<'info>,
 }
 
 pub fn handle_initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
@@ -220,6 +238,73 @@ pub fn handle_initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
         ),
         initial_base_supply,
     )?;
+
+    // --- ipworld hook setup: initialize ExtraAccountMetaList + HookConfig ---
+    // CPI 1: ExtraAccountMetaList (tells Token-2022 which extra accounts the hook needs)
+    {
+        let disc = anchor_lang::solana_program::hash::hash(
+            b"global:initialize_extra_account_meta_list",
+        )
+        .to_bytes();
+        let data = disc[..8].to_vec();
+        let accounts = vec![
+            AccountMeta::new(ctx.accounts.payer.key(), true),
+            AccountMeta::new(ctx.accounts.extra_account_meta_list.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.base_mint.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
+        ];
+        let ix = anchor_lang::solana_program::instruction::Instruction {
+            program_id: ipworld_hook::ID,
+            accounts,
+            data,
+        };
+        anchor_lang::solana_program::program::invoke(
+            &ix,
+            &[
+                ctx.accounts.payer.to_account_info(),
+                ctx.accounts.extra_account_meta_list.to_account_info(),
+                ctx.accounts.base_mint.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.ipworld_hook_program.to_account_info(),
+            ],
+        )?;
+    }
+
+    // CPI 2: HookConfig (stores pool_vault so hook knows the curve vault address)
+    {
+        let disc = anchor_lang::solana_program::hash::hash(
+            b"global:initialize_hook_config",
+        )
+        .to_bytes();
+        let data = disc[..8].to_vec();
+        let accounts = vec![
+            AccountMeta::new(ctx.accounts.payer.key(), true),
+            AccountMeta::new_readonly(ctx.accounts.pool_authority.key(), true),
+            AccountMeta::new_readonly(ctx.accounts.base_mint.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.base_vault.key(), false),
+            AccountMeta::new(ctx.accounts.hook_config.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
+        ];
+        let ix = anchor_lang::solana_program::instruction::Instruction {
+            program_id: ipworld_hook::ID,
+            accounts,
+            data,
+        };
+        let seeds = pool_authority_seeds!(const_pda::pool_authority::BUMP);
+        anchor_lang::solana_program::program::invoke_signed(
+            &ix,
+            &[
+                ctx.accounts.payer.to_account_info(),
+                ctx.accounts.pool_authority.to_account_info(),
+                ctx.accounts.base_mint.to_account_info(),
+                ctx.accounts.base_vault.to_account_info(),
+                ctx.accounts.hook_config.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.ipworld_hook_program.to_account_info(),
+            ],
+            &[&seeds[..]],
+        )?;
+    }
 
     // update mint authority
     let token_mint_authority =
