@@ -56,8 +56,8 @@ pub struct ClaimCreatorTradingFeesCtx<'info> {
 }
 
 /// creator claim fees.
-pub fn handle_claim_creator_trading_fee(
-    ctx: Context<ClaimCreatorTradingFeesCtx>,
+pub fn handle_claim_creator_trading_fee<'c: 'info, 'info>(
+    ctx: Context<'_, '_, 'c, 'info, ClaimCreatorTradingFeesCtx<'info>>,
     max_base_amount: u64,
     max_quote_amount: u64,
 ) -> Result<()> {
@@ -72,6 +72,7 @@ pub fn handle_claim_creator_trading_fee(
         ctx.accounts.token_a_account.to_account_info(),
         &ctx.accounts.token_base_program,
         token_base_amount,
+        ctx.remaining_accounts,
     )?;
 
     transfer_token_from_pool_authority(
@@ -81,6 +82,7 @@ pub fn handle_claim_creator_trading_fee(
         ctx.accounts.token_b_account.to_account_info(),
         &ctx.accounts.token_quote_program,
         token_quote_amount,
+        ctx.remaining_accounts,
     )?;
 
     emit_cpi!(EvtClaimCreatorTradingFee {

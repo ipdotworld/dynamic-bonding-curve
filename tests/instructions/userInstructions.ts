@@ -306,12 +306,26 @@ export async function swapPartialFill(
       referralTokenAccount,
     })
     .remainingAccounts(
-      // TODO should check condition to add this in remaning accounts
       [
         {
           isSigner: false,
           isWritable: false,
           pubkey: SYSVAR_INSTRUCTIONS_PUBKEY,
+        },
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: IPWORLD_HOOK_PROGRAM_ID,
+        },
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: deriveExtraAccountMetaListAddress(poolState.baseMint),
+        },
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: deriveHookConfigAddress(poolState.baseMint),
         },
       ]
     )
@@ -437,12 +451,27 @@ export async function swap(
       referralTokenAccount,
     })
     .remainingAccounts(
-      // TODO should check condition to add this in remaning accounts
       [
         {
           isSigner: false,
           isWritable: false,
           pubkey: SYSVAR_INSTRUCTIONS_PUBKEY,
+        },
+        // Hook accounts for Token-2022 transfer hook resolution
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: IPWORLD_HOOK_PROGRAM_ID,
+        },
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: deriveExtraAccountMetaListAddress(poolState.baseMint),
+        },
+        {
+          isSigner: false,
+          isWritable: false,
+          pubkey: deriveHookConfigAddress(poolState.baseMint),
         },
       ]
     )

@@ -45,7 +45,7 @@ pub struct CreatorWithdrawSurplusCtx<'info> {
     pub token_quote_program: Interface<'info, TokenInterface>,
 }
 
-pub fn handle_creator_withdraw_surplus(ctx: Context<CreatorWithdrawSurplusCtx>) -> Result<()> {
+pub fn handle_creator_withdraw_surplus<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, CreatorWithdrawSurplusCtx<'info>>) -> Result<()> {
     let config = ctx.accounts.config.load()?;
     let mut pool = ctx.accounts.virtual_pool.load_mut()?;
 
@@ -70,6 +70,7 @@ pub fn handle_creator_withdraw_surplus(ctx: Context<CreatorWithdrawSurplusCtx>) 
         ctx.accounts.token_quote_account.to_account_info(),
         &ctx.accounts.token_quote_program,
         creator_surplus_amount,
+        ctx.remaining_accounts,
     )?;
 
     // update creator withdraw surplus

@@ -262,7 +262,7 @@ describe("Create pool with token2022", () => {
       pool: virtualPool,
       inputTokenMint: NATIVE_MINT,
       outputTokenMint: virtualPoolState.baseMint,
-      amountIn: new BN(LAMPORTS_PER_SOL * 5.5),
+      amountIn: new BN(LAMPORTS_PER_SOL * 0.1), // small amount to stay under 5% ownership cap
       minimumAmountOut: new BN(0),
       swapMode: SwapMode.PartialFill,
       referralTokenAccount: null,

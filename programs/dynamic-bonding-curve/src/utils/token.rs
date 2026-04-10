@@ -11,11 +11,15 @@ use anchor_spl::{
     token::Token,
     token_2022::spl_token_2022::{
         self,
-        extension::{BaseStateWithExtensions, ExtensionType, StateWithExtensions},
+        extension::{
+            transfer_hook::TransferHook as TransferHookExtension, BaseStateWithExtensions,
+            ExtensionType, StateWithExtensions,
+        },
     },
     token_interface::{Mint, TokenAccount, TokenInterface},
 };
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use spl_transfer_hook_interface::onchain::add_extra_accounts_for_execute_cpi;
 
 use crate::const_pda::pool_authority::BUMP;
 use crate::safe_math::{SafeCast, SafeMath};
@@ -58,10 +62,11 @@ pub fn transfer_token_from_user<'a, 'c: 'info, 'info>(
     destination_token_account: &'a InterfaceAccount<'info, TokenAccount>,
     token_program: &'a Interface<'info, TokenInterface>,
     amount: u64,
+    remaining_accounts: &[AccountInfo<'info>],
 ) -> Result<()> {
     let destination_account = destination_token_account.to_account_info();
 
-    let instruction = spl_token_2022::instruction::transfer_checked(
+    let mut instruction = spl_token_2022::instruction::transfer_checked(
         token_program.key,
         &token_owner_account.key(),
         &token_mint.key(),
@@ -72,12 +77,27 @@ pub fn transfer_token_from_user<'a, 'c: 'info, 'info>(
         token_mint.decimals,
     )?;
 
-    let account_infos = vec![
+    let mut account_infos = vec![
         token_owner_account.to_account_info(),
         token_mint.to_account_info(),
         destination_account.to_account_info(),
         authority.to_account_info(),
     ];
+
+    // If the mint has a TransferHook extension, append the hook's extra accounts
+    if let Some(hook_program_id) = get_transfer_hook_program_id(token_mint)? {
+        add_extra_accounts_for_execute_cpi(
+            &mut instruction,
+            &mut account_infos,
+            &hook_program_id,
+            token_owner_account.to_account_info(),
+            token_mint.to_account_info(),
+            destination_account.clone(),
+            authority.to_account_info(),
+            amount,
+            remaining_accounts,
+        )?;
+    }
 
     invoke(&instruction, &account_infos)?;
 
@@ -91,10 +111,11 @@ pub fn transfer_token_from_pool_authority<'c: 'info, 'info>(
     token_owner_account: AccountInfo<'info>,
     token_program: &Interface<'info, TokenInterface>,
     amount: u64,
+    remaining_accounts: &[AccountInfo<'info>],
 ) -> Result<()> {
     let signer_seeds = pool_authority_seeds!(BUMP);
 
-    let instruction = spl_token_2022::instruction::transfer_checked(
+    let mut instruction = spl_token_2022::instruction::transfer_checked(
         token_program.key,
         &token_vault.key(),
         &token_mint.key(),
@@ -105,16 +126,49 @@ pub fn transfer_token_from_pool_authority<'c: 'info, 'info>(
         token_mint.decimals,
     )?;
 
-    let account_infos = vec![
+    let mut account_infos = vec![
         token_vault.to_account_info(),
         token_mint.to_account_info(),
-        token_owner_account.to_account_info(),
-        pool_authority.to_account_info(),
+        token_owner_account.clone(),
+        pool_authority.clone(),
     ];
+
+    // If the mint has a TransferHook extension, append the hook's extra accounts
+    if let Some(hook_program_id) = get_transfer_hook_program_id(token_mint)? {
+        add_extra_accounts_for_execute_cpi(
+            &mut instruction,
+            &mut account_infos,
+            &hook_program_id,
+            token_vault.to_account_info(),
+            token_mint.to_account_info(),
+            token_owner_account,
+            pool_authority.clone(),
+            amount,
+            remaining_accounts,
+        )?;
+    }
 
     invoke_signed(&instruction, &account_infos, &[&signer_seeds[..]])?;
 
     Ok(())
+}
+
+/// Reads the mint account data to check if it has a TransferHook extension.
+/// Returns Some(program_id) if the hook is active, None otherwise.
+fn get_transfer_hook_program_id(mint: &InterfaceAccount<Mint>) -> Result<Option<Pubkey>> {
+    let mint_info = mint.to_account_info();
+    // Only Token-2022 mints can have extensions
+    if *mint_info.owner != spl_token_2022::ID {
+        return Ok(None);
+    }
+    let mint_data = mint_info.try_borrow_data()?;
+    let mint_state = StateWithExtensions::<spl_token_2022::state::Mint>::unpack(&mint_data)?;
+    if let Ok(hook) = mint_state.get_extension::<TransferHookExtension>() {
+        let program_id: Option<Pubkey> = hook.program_id.into();
+        Ok(program_id)
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn is_supported_quote_mint(mint_account: &InterfaceAccount<Mint>) -> Result<bool> {

@@ -52,7 +52,7 @@ pub struct WithdrawLeftoverCtx<'info> {
     pub token_base_program: Interface<'info, TokenInterface>,
 }
 
-pub fn handle_withdraw_leftover(ctx: Context<WithdrawLeftoverCtx>) -> Result<()> {
+pub fn handle_withdraw_leftover<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, WithdrawLeftoverCtx<'info>>) -> Result<()> {
     let config = ctx.accounts.config.load()?;
 
     let mut virtual_pool = ctx.accounts.virtual_pool.load_mut()?;
@@ -86,6 +86,7 @@ pub fn handle_withdraw_leftover(ctx: Context<WithdrawLeftoverCtx>) -> Result<()>
         ctx.accounts.token_base_account.to_account_info(),
         &ctx.accounts.token_base_program,
         leftover_amount,
+        ctx.remaining_accounts,
     )?;
 
     // update partner withdraw leftover

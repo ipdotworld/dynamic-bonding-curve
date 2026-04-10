@@ -58,8 +58,8 @@ pub struct ClaimProtocolFeesCtx<'info> {
     pub token_quote_program: Interface<'info, TokenInterface>,
 }
 
-pub fn handle_claim_protocol_fee(
-    ctx: Context<ClaimProtocolFeesCtx>,
+pub fn handle_claim_protocol_fee<'c: 'info, 'info>(
+    ctx: Context<'_, '_, 'c, 'info, ClaimProtocolFeesCtx<'info>>,
     max_base_amount: u64,
     // note: max_quote_amount is just a cap of total trading fee and migration fee, if pool has surplus we could withdraw more than max_quote_amount
     max_quote_amount: u64,
@@ -81,6 +81,7 @@ pub fn handle_claim_protocol_fee(
             ctx.accounts.token_base_account.to_account_info(),
             &ctx.accounts.token_base_program,
             token_base_amount,
+            ctx.remaining_accounts,
         )?;
     }
 
@@ -102,6 +103,7 @@ pub fn handle_claim_protocol_fee(
             ctx.accounts.token_quote_account.to_account_info(),
             &ctx.accounts.token_quote_program,
             token_quote_amount,
+            ctx.remaining_accounts,
         )?;
     }
 

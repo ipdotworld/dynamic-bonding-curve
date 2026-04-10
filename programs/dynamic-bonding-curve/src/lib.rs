@@ -69,8 +69,8 @@ pub mod dynamic_bonding_curve {
     }
 
     #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ClaimProtocolFee))]
-    pub fn claim_protocol_fee(
-        ctx: Context<ClaimProtocolFeesCtx>,
+    pub fn claim_protocol_fee<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, ClaimProtocolFeesCtx<'info>>,
         max_base_amount: u64,
         max_quote_amount: u64,
     ) -> Result<()> {
@@ -85,7 +85,7 @@ pub mod dynamic_bonding_curve {
     }
 
     #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ZapProtocolFee))]
-    pub fn zap_protocol_fee(ctx: Context<ZapProtocolFee>, max_amount: u64) -> Result<()> {
+    pub fn zap_protocol_fee<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, ZapProtocolFee<'info>>, max_amount: u64) -> Result<()> {
         instructions::handle_zap_protocol_fee(ctx, max_amount)
     }
 
@@ -132,8 +132,8 @@ pub mod dynamic_bonding_curve {
     }
 
     #[access_control(is_partner_fee_claimer(&ctx.accounts.config, ctx.accounts.fee_claimer.key))]
-    pub fn claim_trading_fee(
-        ctx: Context<ClaimTradingFeesCtx>,
+    pub fn claim_trading_fee<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, ClaimTradingFeesCtx<'info>>,
         max_amount_a: u64,
         max_amount_b: u64,
     ) -> Result<()> {
@@ -149,7 +149,7 @@ pub mod dynamic_bonding_curve {
 
     // withdraw surplus on quote token
     #[access_control(is_partner_fee_claimer(&ctx.accounts.config, ctx.accounts.fee_claimer.key))]
-    pub fn partner_withdraw_surplus(ctx: Context<PartnerWithdrawSurplusCtx>) -> Result<()> {
+    pub fn partner_withdraw_surplus<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, PartnerWithdrawSurplusCtx<'info>>) -> Result<()> {
         instructions::handle_partner_withdraw_surplus(ctx)
     }
 
@@ -177,8 +177,8 @@ pub mod dynamic_bonding_curve {
     }
 
     #[access_control(is_pool_creator(&ctx.accounts.pool, ctx.accounts.creator.key))]
-    pub fn claim_creator_trading_fee(
-        ctx: Context<ClaimCreatorTradingFeesCtx>,
+    pub fn claim_creator_trading_fee<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, ClaimCreatorTradingFeesCtx<'info>>,
         max_base_amount: u64,
         max_quote_amount: u64,
     ) -> Result<()> {
@@ -187,7 +187,7 @@ pub mod dynamic_bonding_curve {
 
     // withdraw surplus on quote token
     #[access_control(is_pool_creator(&ctx.accounts.virtual_pool, ctx.accounts.creator.key))]
-    pub fn creator_withdraw_surplus(ctx: Context<CreatorWithdrawSurplusCtx>) -> Result<()> {
+    pub fn creator_withdraw_surplus<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, CreatorWithdrawSurplusCtx<'info>>) -> Result<()> {
         instructions::handle_creator_withdraw_surplus(ctx)
     }
 
@@ -199,7 +199,7 @@ pub mod dynamic_bonding_curve {
     }
 
     /// BOTH partner and creator FUNCTIONS ///
-    pub fn withdraw_migration_fee(ctx: Context<WithdrawMigrationFeeCtx>, flag: u8) -> Result<()> {
+    pub fn withdraw_migration_fee<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, WithdrawMigrationFeeCtx<'info>>, flag: u8) -> Result<()> {
         instructions::handle_withdraw_migration_fee(ctx, flag)
     }
 
@@ -233,7 +233,7 @@ pub mod dynamic_bonding_curve {
     }
 
     // withdraw leftover on base token, can only call after pool is initialized
-    pub fn withdraw_leftover(ctx: Context<WithdrawLeftoverCtx>) -> Result<()> {
+    pub fn withdraw_leftover<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, WithdrawLeftoverCtx<'info>>) -> Result<()> {
         instructions::handle_withdraw_leftover(ctx)
     }
 

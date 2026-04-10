@@ -67,8 +67,8 @@ pub enum SenderFlag {
     Creator,
 }
 
-pub fn handle_withdraw_migration_fee(
-    ctx: Context<WithdrawMigrationFeeCtx>,
+pub fn handle_withdraw_migration_fee<'c: 'info, 'info>(
+    ctx: Context<'_, '_, 'c, 'info, WithdrawMigrationFeeCtx<'info>>,
     flag: u8, // 0 as partner and 1 as creator
 ) -> Result<()> {
     let config = ctx.accounts.config.load()?;
@@ -122,6 +122,7 @@ pub fn handle_withdraw_migration_fee(
         ctx.accounts.token_quote_account.to_account_info(),
         &ctx.accounts.token_quote_program,
         fee,
+        ctx.remaining_accounts,
     )?;
 
     emit_cpi!(EvtWithdrawMigrationFee {

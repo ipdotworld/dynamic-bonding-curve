@@ -87,7 +87,7 @@ fn validate_accounts_and_return_withdraw_direction<'info>(
 // Rules:
 // 1. If the token mint is SOL or USDC, then must withdraw to treasury using `claim_protocol_fee` endpoint. No zap out allowed.
 // 2. If the token mint is not SOL or USDC, operator require to zap out to SOL or USDC or either one of the token of the pool
-pub fn handle_zap_protocol_fee(ctx: Context<ZapProtocolFee>, max_amount: u64) -> Result<()> {
+pub fn handle_zap_protocol_fee<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, ZapProtocolFee<'info>>, max_amount: u64) -> Result<()> {
     let config = ctx.accounts.config.load()?;
     let mut pool = ctx.accounts.pool.load_mut()?;
     let is_withdrawing_base = validate_accounts_and_return_withdraw_direction(
@@ -155,6 +155,7 @@ pub fn handle_zap_protocol_fee(ctx: Context<ZapProtocolFee>, max_amount: u64) ->
         receiver_token_ai,
         &ctx.accounts.token_program,
         amount,
+        ctx.remaining_accounts,
     )?;
 
     Ok(())

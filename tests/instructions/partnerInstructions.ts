@@ -28,6 +28,8 @@ import {
   getVirtualPool,
 } from "../utils/fetcher";
 import { VirtualCurveProgram } from "../utils/types";
+import { deriveExtraAccountMetaListAddress, deriveHookConfigAddress } from "../utils/accounts";
+import { IPWORLD_HOOK_PROGRAM_ID } from "../utils/constants";
 
 export type BaseFee = {
   cliffFeeNumerator: BN;
@@ -290,6 +292,23 @@ export async function claimTradingFee(
       tokenBaseProgram,
       tokenQuoteProgram,
     })
+    .remainingAccounts([
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: IPWORLD_HOOK_PROGRAM_ID,
+      },
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: deriveExtraAccountMetaListAddress(poolState.baseMint),
+      },
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: deriveHookConfigAddress(poolState.baseMint),
+      },
+    ])
     .preInstructions(preInstructions)
     .postInstructions(postInstructions)
     .transaction();

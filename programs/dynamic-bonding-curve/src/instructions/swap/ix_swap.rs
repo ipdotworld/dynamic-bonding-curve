@@ -245,6 +245,7 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
         input_vault_account,
         input_program,
         swap_result_2.included_fee_input_amount,
+        ctx.remaining_accounts,
     )?;
 
     // send to user
@@ -255,6 +256,7 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
         ctx.accounts.output_token_account.to_account_info(),
         output_program,
         swap_result.output_amount,
+        ctx.remaining_accounts,
     )?;
 
     // send to referral
@@ -267,6 +269,7 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
                 referral_token_account.to_account_info(),
                 &ctx.accounts.token_base_program,
                 swap_result.referral_fee,
+                ctx.remaining_accounts,
             )?;
         } else {
             transfer_token_from_pool_authority(
@@ -276,6 +279,7 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
                 referral_token_account.to_account_info(),
                 &ctx.accounts.token_quote_program,
                 swap_result.referral_fee,
+                ctx.remaining_accounts,
             )?;
         }
     }
