@@ -1,0 +1,20 @@
+[package]
+name = "ipworld-hook"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = "0.31"
+anchor-spl = "0.31"
+spl-transfer-hook-interface = "0.8"
+spl-tlv-account-resolution = "0.8"
