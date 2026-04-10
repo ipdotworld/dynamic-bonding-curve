@@ -9,3 +9,7 @@ test-ledger
 proptest-regressions
 
 deploy.sh
+# Deployment keypairs (NEVER commit private keys)
+keys/devnet/*.json
+keys/mainnet/*.json
+!keys/local/
