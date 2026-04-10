@@ -429,11 +429,45 @@ These are operations you'll perform during normal operation of the platform.
 | `create-operator.ts` | Once after deploy | Admin | No (global) |
 | `update-authority.ts` | Key rotation | Admin | No (global) |
 | `update-admin.ts` | Transfer admin | Admin | No (global) |
-| `init-fee-config.ts` | On graduation | Backend (auto) | **Yes** — `--mint` |
+| `setup-post-graduation.ts` | On graduation | Backend (auto) | **Yes** — `--mint` |
 | `distribute.ts` | Biweekly / anytime | Anyone | **Yes** — `--mint` |
 | `update-owner.ts` | Owner verified | Authority | **Yes** — `--mint` |
 
 > All scripts: `npx ts-node scripts/admin/<script>.ts --rpc <URL> [args]`
+
+### What is an "operator"?
+
+Operators are inherited from Meteora's original DBC code. It's an allowlist of wallets authorized to create pool configs. You'll create ONE operator (your admin wallet) during setup and never touch it again. `close_operator_account` exists in the DBC code to revoke access — you likely won't need it.
+
+### How graduation works
+
+Graduation is **not triggered by the backend** — it happens permissionlessly on-chain:
+
+1. Users trade on the bonding curve, filling it with SOL
+2. When `quote_amount >= migration_quote_threshold` (e.g., 500 SOL), the pool is "complete"
+3. **Anyone** can call the `migrate_damm_v2` instruction — no special key needed
+4. The migration instruction: removes the transfer hook → creates a DAMM v2 pool → locks liquidity
+5. After this, trading happens on DAMM v2 (permissionless, no hook, no auth)
+
+**What your backend does after detecting graduation:**
+
+```
+Backend detects graduation (poll pool state or subscribe to logs)
+    │
+    ├─→ Call setup-post-graduation.ts for this token's mint
+    │     (creates fee config + vault PDA on the splitter)
+    │
+    ├─→ Record the LP position NFT address
+    │     (needed later to claim fees from DAMM v2)
+    │
+    └─→ Start the biweekly fee claim cycle for this token
+          (claim fees → deposit to vault → distribute)
+```
+
+**How to detect graduation:**
+- **Option A (simple):** Poll the pool account every few minutes. Check if `migration_progress` is complete.
+- **Option B (real-time):** Subscribe to DBC program logs via WebSocket. Look for the migration event.
+- **Option C (Helius/Triton):** Use a webhook service that notifies you when the migration instruction is called.
 
 ### 9.1: Launch a New Token (Backend)
 
@@ -494,7 +528,7 @@ const signature = ed25519Sign(tradeAuth, authorityPrivateKey);
 
 ```bash
 # Example: init fee config for token mint "AbC123..."
-npx ts-node scripts/admin/init-fee-config.ts \
+npx ts-node scripts/admin/setup-post-graduation.ts \
   --rpc https://api.devnet.solana.com \
   --mint AbC123xyzTokenMintAddress111111111111111111 \
   --authority $(solana-keygen pubkey keys/devnet/authority-keypair.json) \

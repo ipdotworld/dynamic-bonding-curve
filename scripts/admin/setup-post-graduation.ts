@@ -1,8 +1,10 @@
 /**
- * Initialize fee splitter config for a token (call after graduation).
+ * Set up fee splitting for a graduated token.
+ * Call this AFTER a token graduates from the bonding curve to DAMM v2.
+ * In production, your backend calls this automatically when it detects graduation.
  *
  * Usage:
- *   npx ts-node scripts/admin/init-fee-config.ts \
+ *   npx ts-node scripts/admin/setup-post-graduation.ts \
  *     --rpc https://api.devnet.solana.com \
  *     --mint <TOKEN_MINT_ADDRESS> \
  *     --authority <AUTHORITY_PUBKEY> \
