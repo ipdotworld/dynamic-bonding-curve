@@ -24,7 +24,7 @@ use crate::{
     safe_math::{SafeCast, SafeMath},
     state::{
         LiquidityDistribution, LiquidityDistributionItem, MigrationFeeOption, MigrationOption,
-        MigrationProgress, PoolConfig, VirtualPool,
+        MigrationProgress, PoolConfig, TokenType, VirtualPool,
     },
     PoolError,
 };
@@ -138,6 +138,7 @@ impl<'info> MigrateDammV2Ctx<'info> {
         migration_fee_option: MigrationFeeOption,
         migrate_collect_fee_mode: MigratedCollectFeeMode,
         config: &PoolConfig,
+        extra_remaining_accounts: Vec<AccountInfo<'info>>,
     ) -> Result<()> {
         let pool_authority_seeds = pool_authority_seeds!(bump);
 
@@ -193,7 +194,8 @@ impl<'info> MigrateDammV2Ctx<'info> {
                                     program: self.amm_program.to_account_info(),
                                 },
                                 &[&pool_authority_seeds[..]],
-                            ),
+                            )
+                            .with_remaining_accounts(extra_remaining_accounts.clone()),
                             initialize_pool_params,
                         )?;
                     } else {
@@ -227,7 +229,8 @@ impl<'info> MigrateDammV2Ctx<'info> {
                                     program: self.amm_program.to_account_info(),
                                 },
                                 &[&pool_authority_seeds[..]],
-                            ),
+                            )
+                            .with_remaining_accounts(extra_remaining_accounts.clone()),
                             InitializePoolParameters {
                                 liquidity,
                                 sqrt_price,
@@ -610,8 +613,57 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
         )
     };
 
+    // --- Step 6: Remove transfer hook before DAMM v2 migration ---
+    // Only for Token2022 mints with TransferHook extension.
+    // DAMM v2 requires TransferHook extension to have BOTH program_id AND authority
+    // set to None. We need two operations:
+    // 1. Update the hook's program_id to None (via TransferHookExtension::Update)
+    // 2. Set the hook's authority to None (via SetAuthority(TransferHookProgramId))
+    // pool_authority still owns TransferHookProgramId authority (kept in Step 3).
+    if config.token_type == TokenType::Token2022 as u8 {
+        let seeds = pool_authority_seeds!(BUMP);
+
+        // 1. Null out the hook program_id
+        let update_ix = anchor_spl::token_2022::spl_token_2022::extension::transfer_hook::instruction::update(
+            &anchor_spl::token_2022::ID,
+            &ctx.accounts.base_mint.key(),
+            &ctx.accounts.pool_authority.key(),
+            &[],
+            None, // new_program_id = None
+        )?;
+        anchor_lang::solana_program::program::invoke_signed(
+            &update_ix,
+            &[
+                ctx.accounts.base_mint.to_account_info(),
+                ctx.accounts.pool_authority.to_account_info(),
+            ],
+            &[&seeds[..]],
+        )?;
+
+        // 2. Null out the hook authority (so no one can re-enable)
+        set_authority(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_base_program.to_account_info(),
+                SetAuthority {
+                    current_authority: ctx.accounts.pool_authority.to_account_info(),
+                    account_or_mint: ctx.accounts.base_mint.to_account_info(),
+                },
+                &[&seeds[..]],
+            ),
+            AuthorityType::TransferHookProgramId,
+            None,
+        )?;
+        msg!("transfer hook removed from mint (program_id + authority nulled)");
+    }
+
     // create pool
     msg!("create pool");
+    // remaining_accounts[0] = damm config, remaining_accounts[1..] = token badges etc.
+    let extra_remaining = if ctx.remaining_accounts.len() > 1 {
+        ctx.remaining_accounts[1..].to_vec()
+    } else {
+        vec![]
+    };
     ctx.accounts.create_pool(
         ctx.remaining_accounts[0].clone(),
         first_position_liquidity_distribution
@@ -622,6 +674,7 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
         migration_fee_option,
         migrated_collect_fee_mode,
         &config,
+        extra_remaining,
     )?;
 
     // lock lp

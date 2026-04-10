@@ -49,6 +49,7 @@ export type MigrateMeteoraDammV2Params = {
   payer: Keypair;
   virtualPool: PublicKey;
   dammConfig: PublicKey;
+  extraRemainingAccounts?: AccountMeta[];
 };
 
 export async function migrateToDammV2(
@@ -107,6 +108,7 @@ export async function migrateToDammV2(
       isWritable: false,
       pubkey: dammConfig,
     },
+    ...(params.extraRemainingAccounts || []),
   ];
 
   const transaction = await program.methods
