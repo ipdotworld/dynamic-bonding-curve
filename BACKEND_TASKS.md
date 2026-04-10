@@ -384,38 +384,74 @@ require (
 
 ---
 
-## Task Priority & Timeline
+## Indexing Provider Recommendation
 
-### Week 1: Core auth + launch
-- [ ] Task 1.1: Authority key setup
+**Use Helius.** It eliminates most of the indexing work:
+
+| Helius Feature | Replaces | What it does |
+|---|---|---|
+| **Enhanced Transactions API** | Custom tx parsing (Task 5.1) | Returns parsed swap data — no Borsh deserialization needed |
+| **Webhooks** | Polling/WebSocket code (Task 2.4) | Push notifications when specific txs hit your program |
+| **DAS API** | Token holder queries (Task 5.3) | Get token holders + balances in one call |
+| **RPC** | Self-hosted node (Task 6.1) | Standard + enhanced RPCs |
+
+**Pricing:** Developer plan $49/mo (10M credits, 50 RPS) is enough for launch. Business $499/mo if you need more.
+
+**Setup:** Sign up at `dashboard.helius.dev`, get API key, use `https://mainnet.helius-rpc.com/?api-key=<KEY>` as your RPC URL.
+
+With Helius, you **don't need to build** a custom geyser plugin, WebSocket subscriber, or transaction parser. Saves 2-3 days of work.
+
+---
+
+## Task Priority & Timeline (1 WEEK)
+
+> With Helius handling indexing infra and the on-chain code already done,
+> this is achievable with 2 devs working in parallel.
+
+### Day 1 (Mon): Foundation
+- [ ] Task 6.1: Sign up for Helius, get API key, configure RPC
+- [ ] Task 1.1: Authority key setup (load from env/KMS)
+- [ ] Task 2.1: Database schema (run migrations)
+- [ ] Task 2.2: Pool config creation (run admin scripts on devnet)
 - [ ] Task 1.2: `/auth/launch` endpoint
 - [ ] Task 1.3: `/auth/trade` endpoint
-- [ ] Task 1.4: Frontend Ed25519 ix construction
-- [ ] Task 2.1: Database schema
-- [ ] Task 2.2: Pool config creation (one-time)
-- [ ] Task 2.3: Full launch flow
-- [ ] Task 6.1: RPC provider setup
 
-### Week 2: Trading + indexing
-- [ ] Task 5.1: Trade indexing
-- [ ] Task 5.2: Price tracking (OHLCV)
-- [ ] Task 5.4: Pool state indexing
-- [ ] Task 5.5: Frontend pool page
-- [ ] Task 6.2: Transaction reliability
+### Day 2 (Tue): Launch + Trade flow
+- [ ] Task 2.3: Full launch flow (backend orchestration)
+- [ ] Task 1.4: Frontend Ed25519 ix construction + wallet adapter
+- [ ] Task 6.2: Transaction sending reliability (simulate → send → retry)
+- **Milestone:** Can launch a token on devnet end-to-end
 
-### Week 3: Graduation + fees
-- [ ] Task 2.4: Graduation detection
-- [ ] Task 2.5: Post-graduation splitter setup
-- [ ] Task 3.1: Fee claim cron
+### Day 3 (Wed): Trading + Indexing
+- [ ] Task 5.1: Trade indexing (Helius Enhanced Transactions API — parse swap events)
+- [ ] Task 5.2: Price tracking (aggregate trades into OHLCV candles)
+- [ ] Task 5.4: Pool state indexing (fetch pool accounts, compute market cap / progress)
+- **Milestone:** Trades visible in API, price chart data flowing
+
+### Day 4 (Thu): Graduation + Fees
+- [ ] Task 2.4: Graduation detection (Helius webhook on DBC program for migration tx)
+- [ ] Task 2.5: Post-graduation splitter setup (auto-call setup-post-graduation)
+- [ ] Task 3.1: Fee claim cron (claim from DAMM v2 → deposit to vault)
 - [ ] Task 3.2: Distribute trigger
-- [ ] Task 5.3: Holder balance tracking
+- **Milestone:** Full lifecycle works — launch → trade → graduate → fees split
 
-### Week 4: Airdrops + owner + polish
-- [ ] Task 3.3: Holder reward airdrops
+### Day 5 (Fri): Airdrops + Owner + Polish
+- [ ] Task 5.3: Holder balance tracking (Helius DAS API for token holders)
+- [ ] Task 3.3: Holder reward airdrops (batch transfer from community wallet)
 - [ ] Task 3.4: UGC reward airdrops
-- [ ] Task 4.1: Owner verification flow
-- [ ] Task 4.2: Owner address change
-- [ ] Task 6.3: Monitoring & alerting
+- [ ] Task 4.1: Owner verification flow + update_owner call
+- [ ] Task 5.5: Frontend pool discovery page
+
+### Day 6 (Sat): Integration testing
+- [ ] End-to-end test on devnet: launch → trade → graduate → claim fees → distribute → airdrop
+- [ ] Task 6.3: Monitoring & alerting setup
+- [ ] Fix any bugs found during E2E testing
+
+### Day 7 (Sun): Buffer + docs
+- [ ] Final bug fixes
+- [ ] API documentation
+- [ ] Frontend polish
+- **Milestone:** Ready for internal demo / devnet launch
 
 ---
 
