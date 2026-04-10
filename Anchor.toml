@@ -5,6 +5,7 @@ skip-lint = false
 [programs.localnet]
 dynamic_bonding_curve = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
 ipworld_hook = "HooK1111111111111111111111111111111111111111"
+ipworld_splitter = "3DuLUcRJpiSubGnDtE7LLaJVdKxUSoUqKFHHmT6KBSqC"
 
 [registry]
 url = "https://api.apr.dev"
