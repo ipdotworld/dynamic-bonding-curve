@@ -16,6 +16,9 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::clock::SECONDS_PER_DAY;
 use anchor_lang::solana_program::instruction::AccountMeta;
 use crate::ipworld_hook;
+use crate::state::IpworldState;
+use crate::state::auth_structs::LaunchAuth;
+use crate::utils::verify_authority_sig::verify_authority_sig;
 use anchor_spl::token_2022::spl_token_2022::instruction::AuthorityType;
 use anchor_spl::token_interface::spl_pod::optional_keys::OptionalNonZeroPubkey;
 use anchor_spl::{
@@ -132,12 +135,46 @@ pub struct InitializeVirtualPoolWithToken2022Ctx<'info> {
     /// CHECK: ExtraAccountMetaList PDA [b"extra-account-metas", base_mint] — created by CPI
     #[account(mut)]
     pub extra_account_meta_list: AccountInfo<'info>,
+
+    // --- ipworld launch auth accounts (Step 5) ---
+
+    /// IpworldState PDA — holds the authority pubkey we verify the Ed25519 signature against
+    #[account(
+        seeds = [b"ipworld_state"],
+        bump = ipworld_state.bump,
+    )]
+    pub ipworld_state: Account<'info, IpworldState>,
+
+    /// CHECK: Instructions sysvar — needed to introspect the Ed25519 verify ix
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::ID)]
+    pub instructions_sysvar: AccountInfo<'info>,
 }
 
 pub fn handle_initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
     ctx: Context<'_, '_, 'c, 'info, InitializeVirtualPoolWithToken2022Ctx<'info>>,
     params: InitializePoolParameters,
 ) -> Result<()> {
+    // --- Step 5: Verify backend-signed LaunchAuth ---
+    #[cfg(not(feature = "skip-launch-auth"))]
+    {
+        let launch_auth: LaunchAuth = verify_authority_sig(
+            &ctx.accounts.instructions_sysvar,
+            &ctx.accounts.ipworld_state,
+        )?;
+        require!(
+            launch_auth.creator == ctx.accounts.creator.key(),
+            PoolError::UnauthorizedLaunch
+        );
+        require!(
+            launch_auth.config == ctx.accounts.config.key(),
+            PoolError::UnauthorizedLaunch
+        );
+        require!(
+            launch_auth.pool_pda == ctx.accounts.pool.key(),
+            PoolError::UnauthorizedLaunch
+        );
+    }
+
     let config = ctx.accounts.config.load()?;
 
     require!(

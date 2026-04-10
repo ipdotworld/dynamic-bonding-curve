@@ -211,6 +211,15 @@ export function deriveMigrationDammV2MetadataAddress(
   )[0];
 }
 
+// --- ipworld state PDA ---
+
+export function deriveIpworldStateAddress(): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("ipworld_state")],
+    DYNAMIC_BONDING_CURVE_PROGRAM_ID
+  )[0];
+}
+
 // --- ipworld hook PDAs ---
 
 export function deriveHookConfigAddress(mint: PublicKey): PublicKey {

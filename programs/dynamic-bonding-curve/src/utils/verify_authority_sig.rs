@@ -44,9 +44,12 @@ pub fn verify_authority_sig<T: BorshDeserialize>(
     let num_signatures = ix_data[0];
     require!(num_signatures == 1, IpworldAuthError::InvalidEd25519Data);
 
-    // Standard offsets for single-signature Ed25519 ix:
-    // pubkey at offset 16, signature at offset 48, message at offset 112
-    let pubkey_offset = u16::from_le_bytes([ix_data[4], ix_data[5]]) as usize;
+    // Ed25519 instruction header layout (per signature):
+    //   [0]: num_signatures, [1]: padding
+    //   [2..4]: signature_offset, [4..6]: signature_instruction_index
+    //   [6..8]: public_key_offset, [8..10]: public_key_instruction_index
+    //   [10..12]: message_data_offset, [12..14]: message_data_size, [14..16]: message_instruction_index
+    let pubkey_offset = u16::from_le_bytes([ix_data[6], ix_data[7]]) as usize;
     let msg_offset = u16::from_le_bytes([ix_data[10], ix_data[11]]) as usize;
     let msg_len = u16::from_le_bytes([ix_data[12], ix_data[13]]) as usize;
 

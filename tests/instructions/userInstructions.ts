@@ -27,6 +27,7 @@ import {
 import {
   deriveExtraAccountMetaListAddress,
   deriveHookConfigAddress,
+  deriveIpworldStateAddress,
   deriveMetadataAccount,
   derivePoolAddress,
   derivePoolAuthority,
@@ -160,6 +161,8 @@ export async function createPoolWithToken2022(
       ipworldHookProgram: IPWORLD_HOOK_PROGRAM_ID,
       hookConfig,
       extraAccountMetaList,
+      ipworldState: deriveIpworldStateAddress(),
+      instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
     .transaction();
 

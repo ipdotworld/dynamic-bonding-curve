@@ -209,6 +209,9 @@ pub enum PoolError {
 
     #[msg("Invalid compounding parameters")]
     InvalidCompoundingParameters,
+
+    #[msg("Launch not authorized by ipworld backend")]
+    UnauthorizedLaunch,
 }
 
 impl From<ProtozolZapError> for PoolError {
