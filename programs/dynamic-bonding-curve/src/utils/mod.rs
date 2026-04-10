@@ -3,3 +3,5 @@ pub mod cpi_checker;
 pub mod damm_v2_utils;
 pub mod token;
 pub use damm_v2_utils::*;
+pub mod verify_authority_sig;
+pub use verify_authority_sig::*;

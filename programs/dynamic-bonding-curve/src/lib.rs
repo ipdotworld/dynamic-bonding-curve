@@ -75,6 +75,33 @@ pub mod dynamic_bonding_curve {
         instructions::handle_zap_protocol_fee(ctx, max_amount)
     }
 
+    /// IPWORLD ADMIN FUNCTIONS ///
+
+    /// One-shot: creates the platform-wide IpworldState PDA.
+    /// Payer becomes initial admin. Authority is the backend KMS key.
+    pub fn init_ipworld_state(
+        ctx: Context<InitIpworldStateCtx>,
+        authority: Pubkey,
+    ) -> Result<()> {
+        instructions::handle_init_ipworld_state(ctx, authority)
+    }
+
+    /// Rotates the backend signing key. Admin-only.
+    pub fn update_ipworld_authority(
+        ctx: Context<UpdateIpworldAuthorityCtx>,
+        new_authority: Pubkey,
+    ) -> Result<()> {
+        instructions::handle_update_ipworld_authority(ctx, new_authority)
+    }
+
+    /// Transfers admin rights to a new key (e.g. wallet → multisig). Admin-only.
+    pub fn update_ipworld_admin(
+        ctx: Context<UpdateIpworldAdminCtx>,
+        new_admin: Pubkey,
+    ) -> Result<()> {
+        instructions::handle_update_ipworld_admin(ctx, new_admin)
+    }
+
     /// PARTNER FUNCTIONS ///
     pub fn create_partner_metadata(
         ctx: Context<CreatePartnerMetadataCtx>,

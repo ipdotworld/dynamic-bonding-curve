@@ -11,3 +11,7 @@ pub mod virtual_pool_metadata;
 pub use virtual_pool_metadata::*;
 pub mod operator;
 pub use operator::*;
+pub mod ipworld_state;
+pub use ipworld_state::*;
+pub mod auth_structs;
+pub use auth_structs::*;
