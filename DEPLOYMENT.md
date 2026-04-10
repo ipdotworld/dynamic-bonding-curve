@@ -362,11 +362,16 @@ npx ts-node scripts/admin/show-ipworld-state.ts --rpc <RPC_URL>
 
 **Who can call:** The admin (whoever initialized IpworldState in 8.1).
 
-**Keys needed:** Deployer wallet.
+**Keys needed:** Deployer wallet (set in `solana config`).
 
 ```bash
+# Example (devnet):
 npx ts-node scripts/admin/create-operator.ts \
-  --rpc <RPC_URL>
+  --rpc https://api.devnet.solana.com
+
+# Example (mainnet):
+npx ts-node scripts/admin/create-operator.ts \
+  --rpc https://api.mainnet-beta.solana.com
 ```
 
 ### Step 8.3: Create Pool Config
@@ -413,6 +418,22 @@ npx ts-node scripts/admin/status.ts --rpc <RPC_URL>
 ## 9. Administrative Operations
 
 These are operations you'll perform during normal operation of the platform.
+
+### Quick Reference
+
+| Script | When | Who | Per-token? |
+|--------|------|-----|------------|
+| `init-ipworld-state.ts` | Once after deploy | Admin | No (global) |
+| `show-ipworld-state.ts` | Anytime | Anyone | No (global) |
+| `status.ts` | Anytime | Anyone | No (global) |
+| `create-operator.ts` | Once after deploy | Admin | No (global) |
+| `update-authority.ts` | Key rotation | Admin | No (global) |
+| `update-admin.ts` | Transfer admin | Admin | No (global) |
+| `init-fee-config.ts` | On graduation | Backend (auto) | **Yes** — `--mint` |
+| `distribute.ts` | Biweekly / anytime | Anyone | **Yes** — `--mint` |
+| `update-owner.ts` | Owner verified | Authority | **Yes** — `--mint` |
+
+> All scripts: `npx ts-node scripts/admin/<script>.ts --rpc <URL> [args]`
 
 ### 9.1: Launch a New Token (Backend)
 
@@ -461,39 +482,57 @@ const signature = ed25519Sign(tradeAuth, authorityPrivateKey);
 // Return { signature, message: tradeAuth, authorityPubkey, expiresAt }
 ```
 
-### 9.3: Initialize Fee Splitter for a Token (Backend)
+### 9.3: Initialize Fee Splitter for a Token (Backend — automatic on graduation)
 
-**When:** A token graduates to DAMM v2. Backend should call this right after graduation.
+**When:** A token graduates to DAMM v2. Your backend should call this automatically when it detects a graduation event on-chain. The script below is for manual/fallback use.
 
-**Who:** Backend / admin (needs deployer wallet to pay for account creation).
+**Who:** Backend (automatic) or admin (manual).
 
 **Keys needed:** Deployer wallet (payer), authority public key.
 
+**Per-token:** Yes — each token gets its own fee config + vault PDA. You specify `--mint` for which token.
+
 ```bash
+# Example: init fee config for token mint "AbC123..."
 npx ts-node scripts/admin/init-fee-config.ts \
-  --rpc <RPC_URL> \
-  --mint <TOKEN_MINT_ADDRESS> \
-  --authority <AUTHORITY_PUBKEY> \
-  --treasury <TREASURY_WALLET> \
-  --community <COMMUNITY_WALLET> \
+  --rpc https://api.devnet.solana.com \
+  --mint AbC123xyzTokenMintAddress111111111111111111 \
+  --authority $(solana-keygen pubkey keys/devnet/authority-keypair.json) \
+  --treasury $(solana-keygen pubkey keys/devnet/treasury-keypair.json) \
+  --community $(solana-keygen pubkey keys/devnet/community-keypair.json) \
   --treasury-bps 5714 \
   --community-bps 3429 \
   --owner-bps 857
+
+# BPS breakdown (of claimable amount after 12.5% DAMM v2 compounding):
+#   5714 bps = 57.14% → treasury  (= 50% of total fees)
+#   3429 bps = 34.29% → community (= 30% of total → holder + UGC airdrops)
+#    857 bps =  8.57% → owner     (= 7.5% of total → IP creator)
+#   Must sum to 10000
 ```
 
 ### 9.4: Distribute Fees (Permissionless)
 
 **When:** Anytime there are fees in a splitter vault. Can be called by anyone — a cron job, a user, a bot.
 
-**Who:** ANYONE. No keys needed beyond a funded wallet to pay the transaction fee (~0.000005 SOL).
+**Who:** ANYONE. No special keys needed — just a funded wallet to pay the tx fee (~0.000005 SOL).
+
+**Per-token:** Yes — specify which token's vault to distribute from.
 
 ```bash
+# Example: distribute fees for token "AbC123..."
 npx ts-node scripts/admin/distribute.ts \
-  --rpc <RPC_URL> \
-  --mint <TOKEN_MINT_ADDRESS>
+  --rpc https://api.devnet.solana.com \
+  --mint AbC123xyzTokenMintAddress111111111111111111
+
+# Output:
+#   Vault: 8xK...vault (1,000,000 tokens)
+#   Treasury:  571,400 tokens → 7xK...treasury
+#   Community: 342,900 tokens → 9xL...community
+#   Owner:      85,700 tokens → 3mN...owner
 ```
 
-In production, your backend runs this on a schedule (e.g., biweekly).
+In production, your backend runs this on a schedule (e.g., biweekly) for all graduated tokens.
 
 ### 9.5: Update IP Owner Address
 
@@ -503,21 +542,30 @@ In production, your backend runs this on a schedule (e.g., biweekly).
 
 **Keys needed:** Authority private key (signer), payer wallet.
 
+**Per-token:** Yes — each token has its own owner. Specify `--mint` for which token.
+
 **What happens:**
-1. All accumulated fees in the vault are distributed first
-2. The owner's share goes to the NEW owner's token account
+1. All accumulated fees in the vault are distributed first (treasury/community/owner shares)
+2. The owner's share from this flush goes to the NEW owner's token account
 3. The owner address is updated on-chain
 4. All future `distribute()` calls send owner share to the new address
+5. If the new owner doesn't have a token account, the script creates one
 
 ```bash
+# Example: set owner of token "AbC123..." to wallet "OwnerWa11et..."
 npx ts-node scripts/admin/update-owner.ts \
-  --rpc <RPC_URL> \
-  --mint <TOKEN_MINT_ADDRESS> \
-  --new-owner <OWNER_WALLET_ADDRESS> \
+  --rpc https://api.devnet.solana.com \
+  --mint AbC123xyzTokenMintAddress111111111111111111 \
+  --new-owner OwnerWa11etAddress1111111111111111111111 \
   --authority keys/devnet/authority-keypair.json
+
+# Output:
+#   Old owner:  community wallet (default before verification)
+#   New owner:  OwnerWa11etAddress...
+#   Vault flushed: 50,000 tokens distributed (owner share → new owner)
 ```
 
-> The new owner must have a token account (ATA) for the IP token. If they don't, the script should create one.
+> Before the owner is verified, their 7.5% share goes to the community wallet (same as holder+UGC pool). Once verified, it routes directly to their personal wallet.
 
 ### 9.6: Claim Fees from DAMM v2 (Backend Cron)
 
@@ -562,30 +610,49 @@ npx ts-node scripts/admin/batch-airdrop.ts \
 
 ### 9.8: Update Authority (Key Rotation)
 
-**When:** Rotating the authority key (security best practice — do periodically).
+**When:** Rotating the authority key (security best practice — do periodically, or if compromised).
 
 **Who:** Current admin of IpworldState.
 
-**Keys needed:** Admin wallet (the deployer who initialized IpworldState), new authority public key.
+**Keys needed:** Admin wallet (set in `solana config`). Only needs the NEW authority's **public** key (not private).
+
+**What changes:** The authority public key stored in IpworldState. After this, all LaunchAuth and TradeAuth must be signed by the new authority key.
 
 ```bash
+# Example: rotate to a new authority key
+solana-keygen new --no-bip39-passphrase -o keys/devnet/authority-v2-keypair.json
 npx ts-node scripts/admin/update-authority.ts \
-  --rpc <RPC_URL> \
-  --new-authority <NEW_AUTHORITY_PUBKEY>
-```
+  --rpc https://api.devnet.solana.com \
+  --new-authority $(solana-keygen pubkey keys/devnet/authority-v2-keypair.json)
 
-After this, the old authority key can no longer sign LaunchAuth/TradeAuth. Update your backend config to use the new key.
+# Output:
+#   Old authority: 7xK...oldAuthority
+#   New authority: 9mN...newAuthority
+#
+# ⚠️  Update your backend to use the new authority key immediately!
+#     Old key can NO LONGER sign LaunchAuth/TradeAuth.
+```
 
 ### 9.9: Update Admin (Transfer Admin Rights)
 
-**When:** Transferring platform admin to a new wallet (e.g., moving to multisig).
+**When:** Transferring platform admin to a new wallet (e.g., moving to multisig for governance).
 
 **Who:** Current admin only.
 
+**Keys needed:** Current admin wallet (set in `solana config`).
+
+**⚠️ IRREVERSIBLE** — once transferred, only the new admin can update authority/admin.
+
 ```bash
+# Example: transfer admin to a Squads multisig
 npx ts-node scripts/admin/update-admin.ts \
-  --rpc <RPC_URL> \
-  --new-admin <NEW_ADMIN_PUBKEY>
+  --rpc https://api.devnet.solana.com \
+  --new-admin SquadsMultisigVaultAddress1111111111111111
+
+# Output:
+#   Old admin: 7xK...deployer
+#   New admin: SquadsMultisigVaultAddress...
+#   ⚠️  You can no longer update authority/admin. Only the new admin can.
 ```
 
 ---
@@ -647,6 +714,18 @@ solana program set-upgrade-authority <PROGRAM_ID> \
   --final \
   --url mainnet-beta
 ```
+
+### Audit options (~968 lines of custom Rust)
+
+| Option | Cost | Timeline | Notes |
+|--------|------|----------|-------|
+| Tier 1 (Ottersec, Neodyme) | $30-60K | 2-4 weeks | Gold standard, recognized by VCs/exchanges |
+| Tier 2 (Sec3, Mad Shield, Halborn) | $15-35K | 1-3 weeks | Solid, well-known |
+| Audit competition (Sherlock, Code4rena) | $10-20K | 1-2 weeks | Multiple reviewers, crowdsourced |
+| Solo auditor (Immunefi network) | $5-15K | 1-2 weeks | Good for small scope like ours |
+| Peer review + bug bounty | $2-5K bounty pool | Ongoing | Cheapest, less formal |
+
+Recommendation: Start with a solo auditor or Tier 2 firm ($10-20K). Add a bug bounty on Immunefi for ongoing coverage.
 
 ### Security checklist
 
