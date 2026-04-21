@@ -147,7 +147,7 @@ describe("Step 6 — Graduation: hook removal + DAMM v2 migration", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1, // DAMM v2
       tokenType: 1,       // Token2022
       tokenDecimal: 6,
@@ -173,7 +173,7 @@ describe("Step 6 — Graduation: hook removal + DAMM v2 migration", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },

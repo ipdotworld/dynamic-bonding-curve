@@ -506,7 +506,7 @@ export async function createDammV2Config(
     vaultConfigKey: PublicKey.default,
     poolCreatorAuthority,
     activationType,
-    collectFeeMode: 0,
+    collectFeeMode: 1,
   };
   const [config] = PublicKey.findProgramAddressSync(
     [Buffer.from("config"), params.index.toBuffer("le", 8)],

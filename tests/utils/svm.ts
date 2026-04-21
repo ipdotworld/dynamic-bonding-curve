@@ -1,8 +1,9 @@
 import { NATIVE_MINT, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { Keypair, LAMPORTS_PER_SOL, SystemProgram } from "@solana/web3.js";
+import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
+import { createHash } from "crypto";
 import { LiteSVM } from "litesvm";
 import path from "path";
-import { derivePoolAuthority } from "./accounts";
+import { deriveIpworldStateAddress, derivePoolAuthority } from "./accounts";
 import {
   DAMM_PROGRAM_ID,
   DAMM_V2_PROGRAM_ID,
@@ -61,6 +62,34 @@ export function startSvm() {
     owner: SystemProgram.programId,
     executable: false,
   });
+
+  // Initialize IpworldState PDA required for Token2022 pool creation.
+  // Layout: 8 discriminator + 32 authority + 32 admin + 32 pending_authority + 32 pending_admin + 1 bump = 137 bytes
+  const ipworldState = deriveIpworldStateAddress();
+  const [, ipworldBump] = PublicKey.findProgramAddressSync(
+    [Buffer.from("ipworld_state")],
+    DYNAMIC_BONDING_CURVE_PROGRAM_ID
+  );
+  const discriminator = createHash("sha256")
+    .update("account:IpworldState")
+    .digest()
+    .subarray(0, 8);
+  const dummyAuthority = Keypair.generate().publicKey;
+  const zeroKey = PublicKey.default;
+  const ipworldData = Buffer.alloc(137);
+  discriminator.copy(ipworldData, 0);
+  dummyAuthority.toBuffer().copy(ipworldData, 8);    // authority
+  dummyAuthority.toBuffer().copy(ipworldData, 40);   // admin
+  zeroKey.toBuffer().copy(ipworldData, 72);          // pending_authority (zero = no pending)
+  zeroKey.toBuffer().copy(ipworldData, 104);         // pending_admin (zero = no pending)
+  ipworldData.writeUInt8(ipworldBump, 136);          // bump
+  svm.setAccount(ipworldState, {
+    lamports: 1_000_000_000,
+    data: ipworldData,
+    owner: DYNAMIC_BONDING_CURVE_PROGRAM_ID,
+    executable: false,
+  });
+
   return svm;
 }
 

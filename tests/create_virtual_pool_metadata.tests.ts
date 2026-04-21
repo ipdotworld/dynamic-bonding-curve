@@ -72,7 +72,7 @@ describe("Create virtual pool metadata", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1,
       tokenType: 0, // spl_token
       tokenDecimal: 6,
@@ -98,7 +98,7 @@ describe("Create virtual pool metadata", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },

@@ -74,7 +74,7 @@ describe("Migrate to damm v2 with vesting", () => {
   it("Full flow migrated to damm v2 with vesting", async () => {
     const migratedPoolFee = {
       poolFeeBps: 100,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       dynamicFee: 0,
     };
 
@@ -248,7 +248,7 @@ async function fullFlow(
     migrationFeeOption: 6, // customizable
     migratedPoolFee: {
       poolFeeBps: 100,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       dynamicFee: 0,
     },
   };

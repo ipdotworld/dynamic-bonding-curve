@@ -186,7 +186,7 @@ describe("Step 5 — Launch Auth enforcement", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1,
       tokenType: 1,
       tokenDecimal: 6,
@@ -212,7 +212,7 @@ describe("Step 5 — Launch Auth enforcement", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },

@@ -70,7 +70,7 @@ describe("Migrate to damm v2 with dynamic config pool", () => {
   it("Full flow migrated to damm v2 new create pool endpoint", async () => {
     const migratedPoolFee = {
       poolFeeBps: 100,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       dynamicFee: 0,
     };
 
@@ -136,7 +136,7 @@ describe("Migrate to damm v2 with dynamic config pool", () => {
   it("Full flow migrated to damm v2 with fee market cap scheduler", async () => {
     const migratedPoolFee = {
       poolFeeBps: 1000,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       dynamicFee: 1,
     };
 
@@ -315,7 +315,7 @@ async function fullFlow(
       dynamicFee: null,
     },
     activationType: 0,
-    collectFeeMode: 0,
+    collectFeeMode: 1,
     migrationOption: 1, // damm v2
     tokenType: 0, // spl_token
     tokenDecimal: 6,

@@ -63,7 +63,7 @@ describe("Create config", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1, // damm v2
       tokenType: 1, // token 2022
       tokenDecimal: 6,
@@ -89,7 +89,7 @@ describe("Create config", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },
@@ -113,6 +113,11 @@ describe("Create config", () => {
       enableFirstSwapWithMinFee: false,
       compoundingFeeBps: 0,
       curve: curves,
+      ipOwnerShare: 50000,
+      airdropShare: 30000,
+      referralShare: 20000,
+      creatorShare: 100000,
+      tokenAirdropShare: 50000,
     };
   });
 

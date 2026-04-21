@@ -476,7 +476,7 @@ async function createPool(
       dynamicFee: null,
     },
     activationType: 0,
-    collectFeeMode: 0,
+    collectFeeMode: 1,
     migrationOption: 1,
     tokenType: tokenType,
     tokenDecimal: 6,
@@ -502,7 +502,7 @@ async function createPool(
     creatorTradingFeePercentage: 0,
     tokenUpdateAuthority: tokenUpdateAuthority,
     migratedPoolFee: {
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       dynamicFee: 0,
       poolFeeBps: 0,
     },

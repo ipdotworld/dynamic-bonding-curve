@@ -67,7 +67,7 @@ describe("Claim protocol liquidity migration fee", () => {
       customizableMigrationFeeOption,
       {
         poolFeeBps: 100,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
       },
       partner,
@@ -109,7 +109,7 @@ describe("Claim protocol liquidity migration fee", () => {
       fixedFeeBps0MigrationFeeOption,
       {
         poolFeeBps: 0,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
       },
       partner,

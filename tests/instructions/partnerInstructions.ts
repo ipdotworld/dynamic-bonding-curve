@@ -114,6 +114,12 @@ export type ConfigParameters = {
   enableFirstSwapWithMinFee: boolean;
   compoundingFeeBps: number;
   curve: Array<LiquidityDistributionParameters>;
+  // Fee share parameters (new fields)
+  ipOwnerShare: number;
+  airdropShare: number;
+  referralShare: number;
+  creatorShare: number;
+  tokenAirdropShare: number;
 };
 
 export type LiquidityVestingInfoParams = {
@@ -150,9 +156,32 @@ export async function createConfig(
     };
   }
 
+  // Apply defaults for new fee share parameters if not provided
+  const ipOwnerShare = instructionParams.ipOwnerShare ?? 50000;
+  const airdropShare = instructionParams.airdropShare ?? 30000;
+  const referralShare = instructionParams.referralShare ?? 20000;
+  const creatorShare = instructionParams.creatorShare ?? 100000;
+  const tokenAirdropShare = instructionParams.tokenAirdropShare ?? 50000;
+
+  // Ensure collectFeeMode is OutputToken (1), not QuoteToken (0)
+  // The program only accepts OutputToken mode for new pools
+  const collectFeeMode =
+    instructionParams.collectFeeMode === 0 ? 1 : instructionParams.collectFeeMode;
+
+  // MigrationOption 0 (MeteoraDamm) is disabled — redirect to DammV2 (1)
+  const migrationOption =
+    instructionParams.migrationOption === 0 ? 1 : instructionParams.migrationOption;
+
   const transaction = await program.methods
     .createConfig({
       ...instructionParams,
+      collectFeeMode,
+      migrationOption,
+      ipOwnerShare,
+      airdropShare,
+      referralShare,
+      creatorShare,
+      tokenAirdropShare,
       padding: new Array(2).fill(0),
     })
     .accountsPartial({

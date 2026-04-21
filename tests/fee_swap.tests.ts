@@ -103,7 +103,7 @@ describe("Fee Swap test", () => {
           creatorFeePercentage: 0,
         },
         migratedPoolFee: {
-          collectFeeMode: 0,
+          collectFeeMode: 1,
           dynamicFee: 0,
           poolFeeBps: 0,
         },
@@ -421,7 +421,7 @@ describe("Fee Swap test", () => {
           dynamicFee: null,
         },
         activationType: 0,
-        collectFeeMode: 0, // OnlyB - only quote token
+        collectFeeMode: 1, // OnlyB - only quote token
         migrationOption: 0,
         tokenType: 0, // spl_token
         tokenDecimal: 6,
@@ -447,7 +447,7 @@ describe("Fee Swap test", () => {
           creatorFeePercentage: 0,
         },
         migratedPoolFee: {
-          collectFeeMode: 0,
+          collectFeeMode: 1,
           dynamicFee: 0,
           poolFeeBps: 0,
         },

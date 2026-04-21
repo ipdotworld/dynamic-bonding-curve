@@ -8,6 +8,7 @@
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.0",
     "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
+    "@metaplex-foundation/umi": "^1.5.1",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {

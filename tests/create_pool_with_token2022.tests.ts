@@ -135,7 +135,7 @@ describe("Create pool with token2022", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1, // damm v2
       tokenType: 1, // token 2022
       tokenDecimal: 6,
@@ -161,7 +161,7 @@ describe("Create pool with token2022", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },

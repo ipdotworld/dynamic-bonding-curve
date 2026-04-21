@@ -275,7 +275,7 @@ async function createInitializePoolIx(
 
   const migratedPoolFee = {
     poolFeeBps: 100,
-    collectFeeMode: 0,
+    collectFeeMode: 1,
     dynamicFee: 0,
   };
 
@@ -285,7 +285,7 @@ async function createInitializePoolIx(
       dynamicFee: null,
     },
     activationType: 0,
-    collectFeeMode: 0,
+    collectFeeMode: 1,
     migrationOption: 1, // damm v2
     tokenType: 0, // spl_token
     tokenDecimal: 6,

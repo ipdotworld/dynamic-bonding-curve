@@ -109,24 +109,9 @@ export async function createPoolWithSplToken(
   program: VirtualCurveProgram,
   params: CreatePoolSplTokenParams
 ): Promise<PublicKey> {
-  const { instruction, pool, baseMintKP } =
-    await createInitializePoolWithSplTokenIx(svm, program, params);
-
-  const { payer, poolCreator } = params;
-
-  const transaction = new Transaction();
-  transaction.recentBlockhash = svm.latestBlockhash();
-
-  transaction.add(
-    ComputeBudgetProgram.setComputeUnitLimit({
-      units: 400_000,
-    }),
-    instruction
-  );
-
-  sendTransactionMaybeThrow(svm, transaction, [payer, baseMintKP, poolCreator]);
-
-  return pool;
+  // SPL Token pools are disabled — IPWorld uses Token-2022 exclusively.
+  // Redirect to createPoolWithToken2022 transparently.
+  return createPoolWithToken2022(svm, program, params);
 }
 
 export async function createPoolWithToken2022(

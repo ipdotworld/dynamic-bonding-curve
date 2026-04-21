@@ -88,7 +88,7 @@ describe("Claim lp on meteora dammm", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 0,
       tokenType: 0, // spl_token
       tokenDecimal: 6,
@@ -114,7 +114,7 @@ describe("Claim lp on meteora dammm", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },

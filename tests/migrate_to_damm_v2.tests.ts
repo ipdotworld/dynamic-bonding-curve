@@ -105,7 +105,7 @@ describe("Migrate to damm v2", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1,
       tokenType: 0, // spl_token
       tokenDecimal: 6,
@@ -131,7 +131,7 @@ describe("Migrate to damm v2", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },
