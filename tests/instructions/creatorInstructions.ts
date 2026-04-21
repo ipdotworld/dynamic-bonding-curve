@@ -17,6 +17,8 @@ import {
 } from "../utils";
 import { getConfig, getVirtualPool } from "../utils/fetcher";
 import { VirtualCurveProgram } from "../utils/types";
+import { deriveExtraAccountMetaListAddress, deriveHookConfigAddress } from "../utils/accounts";
+import { IPWORLD_HOOK_PROGRAM_ID } from "../utils/constants";
 
 export type ClaimCreatorTradeFeeParams = {
   creator: Keypair;
@@ -86,6 +88,23 @@ export async function claimCreatorTradingFee(
       tokenBaseProgram,
       tokenQuoteProgram,
     })
+    .remainingAccounts([
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: IPWORLD_HOOK_PROGRAM_ID,
+      },
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: deriveExtraAccountMetaListAddress(poolState.baseMint),
+      },
+      {
+        isSigner: false,
+        isWritable: false,
+        pubkey: deriveHookConfigAddress(poolState.baseMint),
+      },
+    ])
     .preInstructions(preInstructions)
     .postInstructions(postInstructions)
     .transaction();

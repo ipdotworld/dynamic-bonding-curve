@@ -9,7 +9,6 @@ import {
   CreateConfigParams,
   createLocker,
   createPoolWithSplToken,
-  creatorWithdrawMigrationFee,
   partnerWithdrawMigrationFee,
   swap,
   SwapMode,
@@ -115,26 +114,12 @@ describe("Migration fee", () => {
       instructionParams.migrationQuoteThreshold.mul(new BN(2)).toNumber()
     );
 
-    const creatorTokenQuoteAccount = getAssociatedTokenAddressSync(
-      configState.quoteMint,
-      poolCreator.publicKey,
-      true,
-      getTokenProgram(configState.quoteTokenFlag)
-    );
-
     const partnerTokenQuoteAccount = getAssociatedTokenAddressSync(
       configState.quoteMint,
       partner.publicKey,
       true,
       getTokenProgram(configState.quoteTokenFlag)
     );
-    const creatorTokenAccountState = getTokenAccount(
-      svm,
-      creatorTokenQuoteAccount
-    );
-    const preCreatorBalance = creatorTokenAccountState
-      ? Number(creatorTokenAccountState.amount)
-      : 0;
 
     const partnerTokenAccountState = getTokenAccount(
       svm,
@@ -155,32 +140,20 @@ describe("Migration fee", () => {
       partner
     );
 
-    // calculate migration fee
+    // A-04: entire migration fee goes to fee_claimer (partner); creator split removed
     const product = configState.migrationQuoteThreshold.muln(
       100 - instructionParams.migrationFee.feePercentage
     );
     const quoteAmount = product.addn(99).divn(100);
     const totalMigrationFee =
       configState.migrationQuoteThreshold.sub(quoteAmount);
-    const creatorMigrationFee = totalMigrationFee
-      .muln(instructionParams.migrationFee.creatorFeePercentage)
-      .divn(100);
-    const partnerMigrationFee = totalMigrationFee.sub(creatorMigrationFee);
-
-    const postCreatorBalance = Number(
-      getTokenAccount(svm, creatorTokenQuoteAccount).amount ?? 0
-    );
 
     const postPartnerBalance = Number(
       getTokenAccount(svm, partnerTokenQuoteAccount).amount ?? 0
     );
 
-    expect(postCreatorBalance - preCreatorBalance).eq(
-      Number(creatorMigrationFee)
-    );
-
     expect(postPartnerBalance - prePartnerBalance).eq(
-      Number(partnerMigrationFee)
+      Number(totalMigrationFee)
     );
   });
 });
@@ -258,14 +231,8 @@ async function fullFlow(
   };
   await migrateToDammV2(svm, program, migrationParams);
 
-  // withdraw migration fee
-  // creator withdraw migration fee
-  await creatorWithdrawMigrationFee(svm, program, {
-    creator: poolCreator,
-    virtualPool,
-  });
-
-  // partner withdraw migration fee
+  // A-04: entire migration fee goes to fee_claimer (partner) via withdrawMigrationFee(0)
+  // creator withdraw migration fee removed in A-04
   await partnerWithdrawMigrationFee(svm, program, {
     partner,
     virtualPool,

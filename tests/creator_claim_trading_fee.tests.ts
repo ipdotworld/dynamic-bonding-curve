@@ -5,14 +5,12 @@ import { LiteSVM } from "litesvm";
 import {
   ClaimCreatorTradeFeeParams,
   claimCreatorTradingFee,
-  claimTradingFee,
   ConfigParameters,
   createConfig,
   CreateConfigParams,
   createLocker,
   createPoolWithSplToken,
   creatorWithdrawSurplus,
-  partnerWithdrawSurplus,
   swap,
   SwapMode,
   SwapParams,
@@ -32,7 +30,6 @@ import {
   encodePermissions,
   expectThrowsAsync,
   generateAndFund,
-  getDbcProgramErrorCodeHexString,
   startSvm,
   U64_MAX,
 } from "./utils";
@@ -424,7 +421,8 @@ async function fullFlow(
   };
   await migrateToDammV2(svm, program, migrationParams);
 
-  const errorCodeUnauthorized = getDbcProgramErrorCodeHexString("Unauthorized");
+  // Anchor ConstraintHasOne error (2001 = 0x7d1) is thrown when creator mismatch
+  const errorCodeUnauthorized = "0x7d1";
 
   // unauthorized pool creator claim trading fee
   expectThrowsAsync(async () => {
@@ -445,22 +443,9 @@ async function fullFlow(
   };
   await claimCreatorTradingFee(svm, program, claimTradingFeeParams);
 
-  // unauthorized partner claim trading fee
-  expectThrowsAsync(async () => {
-    await claimTradingFee(svm, program, {
-      feeClaimer: poolCreator,
-      pool: virtualPool,
-      maxBaseAmount: new BN(U64_MAX),
-      maxQuoteAmount: new BN(U64_MAX),
-    });
-  }, errorCodeUnauthorized);
-  // partner claim trading fee
-  await claimTradingFee(svm, program, {
-    feeClaimer: partner,
-    pool: virtualPool,
-    maxBaseAmount: new BN(U64_MAX),
-    maxQuoteAmount: new BN(U64_MAX),
-  });
+  // claim_trading_fee removed in A-04; partner uses claimTradingFee which no longer exists
+  // unauthorized creator trying partner fee — skip this section
+  // partner claim trading fee also removed; skip
 
   // unauthorized creator
   expectThrowsAsync(async () => {
@@ -475,16 +460,6 @@ async function fullFlow(
     virtualPool,
   });
 
-  // unauthorized partner
-  expectThrowsAsync(async () => {
-    await partnerWithdrawSurplus(svm, program, {
-      feeClaimer: poolCreator,
-      virtualPool,
-    });
-  }, errorCodeUnauthorized);
-  // partner withdraw surplus
-  await partnerWithdrawSurplus(svm, program, {
-    feeClaimer: partner,
-    virtualPool,
-  });
+  // partner_withdraw_surplus removed in A-04 (partner system removal)
+  // skipping partner surplus withdrawal assertions
 }

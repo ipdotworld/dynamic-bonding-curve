@@ -66,12 +66,13 @@ describe("Build graph curve", () => {
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let kFactor = 1.2;
+    // Locker program does not support Token2022 Transfer Hook remaining accounts yet
     let lockedVesting = {
-      amountPerPeriod: new BN(123456),
+      amountPerPeriod: new BN(0),
       cliffDurationFromMigrationTime: new BN(0),
-      frequency: new BN(1),
-      numberOfPeriod: new BN(120),
-      cliffUnlockAmount: new BN(123456),
+      frequency: new BN(0),
+      numberOfPeriod: new BN(0),
+      cliffUnlockAmount: new BN(0),
     };
     let leftOver = 10_000;
     let migrationOption = 1;
@@ -132,12 +133,13 @@ describe("Build graph curve", () => {
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let kFactor = 0.6;
+    // Locker program does not support Token2022 Transfer Hook remaining accounts yet
     let lockedVesting = {
-      amountPerPeriod: new BN(123456),
+      amountPerPeriod: new BN(0),
       cliffDurationFromMigrationTime: new BN(0),
-      frequency: new BN(1),
-      numberOfPeriod: new BN(120),
-      cliffUnlockAmount: new BN(123456),
+      frequency: new BN(0),
+      numberOfPeriod: new BN(0),
+      cliffUnlockAmount: new BN(0),
     };
     let leftOver = 10_000;
     let migrationOption = 1;

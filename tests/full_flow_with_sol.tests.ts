@@ -255,15 +255,16 @@ describe("Full flow with spl-token", () => {
     expect(secondPositionAccount).to.not.be.null;
   });
 
-  it("Partner withdraw surplus", async () => {
-    // partner withdraw surplus
+  // partner_withdraw_surplus removed in A-04 (partner system removal)
+  it.skip("Partner withdraw surplus", async () => {
     await partnerWithdrawSurplus(svm, program, {
       feeClaimer: partner,
       virtualPool,
     });
   });
 
-  it("Partner can not withdraw again", async () => {
+  // partner_withdraw_surplus removed in A-04 (partner system removal)
+  it.skip("Partner can not withdraw again", async () => {
     try {
       await partnerWithdrawSurplus(svm, program, {
         feeClaimer: partner,
@@ -289,7 +290,8 @@ describe("Full flow with spl-token", () => {
     });
   });
 
-  it("Partner claim trading fee", async () => {
+  // claim_trading_fee removed in A-04 (partner system removal); use claim_creator_trading_fee
+  it.skip("Partner claim trading fee", async () => {
     const claimTradingFeeParams: ClaimTradeFeeParams = {
       feeClaimer: partner,
       pool: virtualPool,

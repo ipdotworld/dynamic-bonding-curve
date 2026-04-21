@@ -59,7 +59,8 @@ describe("Design default curve", () => {
     });
   });
 
-  it("Design curve with lock vesting", async () => {
+  // Locker program does not support Token2022 Transfer Hook remaining accounts yet
+  it.skip("Design curve with lock vesting", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
