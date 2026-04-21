@@ -4,19 +4,24 @@ import {
   createConfig,
   CreateConfigParams,
   createLocker,
-  createMeteoraMetadata,
   createPoolWithSplToken,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
   swap,
   SwapMode,
   SwapParams,
 } from "./instructions";
 import {
-  createDammConfig,
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
+import {
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
+  DammV2OperatorPermission,
   derivePoolAuthority,
   designGraphCurve,
+  encodePermissions,
   generateAndFund,
   getMint,
   startSvm,
@@ -29,7 +34,7 @@ import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 import { createToken, mintSplTokenTo } from "./utils/token";
 
-describe.skip("Build graph curve", () => {
+describe("Build graph curve", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;
@@ -46,6 +51,12 @@ describe.skip("Build graph curve", () => {
     user = generateAndFund(svm);
     poolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
+
+    await createDammV2Operator(svm, {
+      whitelistAddress: admin.publicKey,
+      admin,
+      permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+    });
   });
 
   it("Graph curve with k > 1", async () => {
@@ -63,7 +74,7 @@ describe.skip("Build graph curve", () => {
       cliffUnlockAmount: new BN(123456),
     };
     let leftOver = 10_000;
-    let migrationOption = 0;
+    let migrationOption = 1;
     let quoteMint = createToken(svm, admin, admin.publicKey, tokenQuoteDecimal);
     let instructionParams = designGraphCurve(
       totalTokenSupply,
@@ -109,7 +120,8 @@ describe.skip("Build graph curve", () => {
       poolCreator,
       user,
       admin,
-      quoteMint
+      quoteMint,
+      partner
     );
   });
 
@@ -128,7 +140,7 @@ describe.skip("Build graph curve", () => {
       cliffUnlockAmount: new BN(123456),
     };
     let leftOver = 10_000;
-    let migrationOption = 0;
+    let migrationOption = 1;
     let quoteMint = createToken(svm, admin, admin.publicKey, tokenQuoteDecimal);
     let instructionParams = designGraphCurve(
       totalTokenSupply,
@@ -174,7 +186,8 @@ describe.skip("Build graph curve", () => {
       poolCreator,
       user,
       admin,
-      quoteMint
+      quoteMint,
+      partner
     );
   });
 });
@@ -187,7 +200,8 @@ async function fullFlow(
   poolCreator: Keypair,
   user: Keypair,
   admin: Keypair,
-  quoteMint: PublicKey
+  quoteMint: PublicKey,
+  partner: Keypair
 ) {
   // create pool
   let virtualPool = await createPoolWithSplToken(svm, program, {
@@ -221,13 +235,8 @@ async function fullFlow(
 
   // migrate
   const poolAuthority = derivePoolAuthority();
-  let dammConfig = await createDammConfig(svm, admin, poolAuthority);
-  const migrationParams: MigrateMeteoraParams = {
-    payer: admin,
-    virtualPool,
-    dammConfig,
-  };
-  await createMeteoraMetadata(svm, program, {
+  const dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+  await createMeteoraDammV2Metadata(svm, program, {
     payer: admin,
     virtualPool,
     config,
@@ -239,7 +248,12 @@ async function fullFlow(
       virtualPool,
     });
   }
-  await migrateToMeteoraDamm(svm, program, migrationParams);
+  const migrationParams: MigrateMeteoraDammV2Params = {
+    payer: partner,
+    virtualPool,
+    dammConfig,
+  };
+  await migrateToDammV2(svm, program, migrationParams);
   const baseMintData = getMint(svm, virtualPoolState.baseMint);
 
   expect(baseMintData.supply.toString()).eq(

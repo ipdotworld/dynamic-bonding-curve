@@ -4,10 +4,7 @@ import {
   createConfig,
   CreateConfigParams,
   createLocker,
-  createMeteoraMetadata,
   createPoolWithSplToken,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
   partnerWithdrawSurplus,
   swap,
   SwapMode,
@@ -18,10 +15,18 @@ import {
   OperatorPermission,
 } from "./instructions";
 import {
-  createDammConfig,
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
+import {
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
+  DammV2OperatorPermission,
   derivePoolAuthority,
   designCurve,
+  encodePermissions,
   generateAndFund,
   getMint,
   startSvm,
@@ -34,7 +39,7 @@ import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 import { createToken, mintSplTokenTo } from "./utils/token";
 
-describe.skip("Swap Over the Curve", () => {
+describe("Swap Over the Curve", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;
@@ -57,6 +62,12 @@ describe.skip("Swap Over the Curve", () => {
       whitelistedAddress: operator.publicKey,
       permissions: [OperatorPermission.ClaimProtocolFee],
     });
+
+    await createDammV2Operator(svm, {
+      whitelistAddress: admin.publicKey,
+      admin,
+      permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+    });
   });
 
   it("Swap exact in over the curve", async () => {
@@ -65,7 +76,7 @@ describe.skip("Swap Over the Curve", () => {
     let migrationQuoteThreshold = 300; // 300 sol
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
-    let migrationOption = 0; // damm v1
+    let migrationOption = 1; // damm v2
     let lockedVesting = {
       amountPerPeriod: new BN(0),
       cliffDurationFromMigrationTime: new BN(0),
@@ -142,13 +153,8 @@ describe.skip("Swap Over the Curve", () => {
 
     // migrate
     const poolAuthority = derivePoolAuthority();
-    let dammConfig = await createDammConfig(svm, admin, poolAuthority);
-    const migrationParams: MigrateMeteoraParams = {
-      payer: admin,
-      virtualPool,
-      dammConfig,
-    };
-    await createMeteoraMetadata(svm, program, {
+    const dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+    await createMeteoraDammV2Metadata(svm, program, {
       payer: admin,
       virtualPool,
       config,
@@ -160,7 +166,12 @@ describe.skip("Swap Over the Curve", () => {
         virtualPool,
       });
     }
-    await migrateToMeteoraDamm(svm, program, migrationParams);
+    const migrationParams: MigrateMeteoraDammV2Params = {
+      payer: partner,
+      virtualPool,
+      dammConfig,
+    };
+    await migrateToDammV2(svm, program, migrationParams);
 
     await claimProtocolFee(svm, program, {
       operator: operator,
@@ -185,7 +196,7 @@ describe.skip("Swap Over the Curve", () => {
     let migrationQuoteThreshold = 300; // 300 sol
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
-    let migrationOption = 0; // damm v1
+    let migrationOption = 1; // damm v2
     let lockedVesting = {
       amountPerPeriod: new BN(0),
       cliffDurationFromMigrationTime: new BN(0),
@@ -292,13 +303,8 @@ describe.skip("Swap Over the Curve", () => {
 
     // migrate
     const poolAuthority = derivePoolAuthority();
-    let dammConfig = await createDammConfig(svm, admin, poolAuthority);
-    const migrationParams: MigrateMeteoraParams = {
-      payer: admin,
-      virtualPool,
-      dammConfig,
-    };
-    await createMeteoraMetadata(svm, program, {
+    const dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+    await createMeteoraDammV2Metadata(svm, program, {
       payer: admin,
       virtualPool,
       config,
@@ -310,7 +316,12 @@ describe.skip("Swap Over the Curve", () => {
         virtualPool,
       });
     }
-    await migrateToMeteoraDamm(svm, program, migrationParams);
+    const migrationParams: MigrateMeteoraDammV2Params = {
+      payer: partner,
+      virtualPool,
+      dammConfig,
+    };
+    await migrateToDammV2(svm, program, migrationParams);
 
     await claimProtocolFee(svm, program, {
       operator: operator,

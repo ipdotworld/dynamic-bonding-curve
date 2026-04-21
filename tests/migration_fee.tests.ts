@@ -16,15 +16,18 @@ import {
   SwapParams,
 } from "./instructions";
 import {
-  createMeteoraMetadata,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
-} from "./instructions/meteoraMigration";
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
 import {
-  createDammConfig,
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
+  DammV2OperatorPermission,
   derivePoolAuthority,
   designCurve,
+  encodePermissions,
   generateAndFund,
   getTokenAccount,
   getTokenProgram,
@@ -34,7 +37,7 @@ import { getConfig, getVirtualPool } from "./utils/fetcher";
 import { createToken, mintSplTokenTo } from "./utils/token";
 import { VirtualCurveProgram } from "./utils/types";
 
-describe.skip("Migration fee", () => {
+describe("Migration fee", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;
@@ -51,13 +54,19 @@ describe.skip("Migration fee", () => {
     user = generateAndFund(svm);
     poolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
+
+    await createDammV2Operator(svm, {
+      whitelistAddress: admin.publicKey,
+      admin,
+      permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+    });
   });
 
   it("Creator and partner withdraw migration fee", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 0.9; // 0.9%;
     let migrationQuoteThreshold = 300; // 300 sol
-    let migrationOption = 0;
+    let migrationOption = 1;
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let lockedVesting = {
@@ -229,13 +238,8 @@ async function fullFlow(
 
   // migrate
   const poolAuthority = derivePoolAuthority();
-  let dammConfig = await createDammConfig(svm, admin, poolAuthority);
-  const migrationParams: MigrateMeteoraParams = {
-    payer: admin,
-    virtualPool,
-    dammConfig,
-  };
-  await createMeteoraMetadata(svm, program, {
+  const dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+  await createMeteoraDammV2Metadata(svm, program, {
     payer: admin,
     virtualPool,
     config,
@@ -247,7 +251,12 @@ async function fullFlow(
       virtualPool,
     });
   }
-  await migrateToMeteoraDamm(svm, program, migrationParams);
+  const migrationParams: MigrateMeteoraDammV2Params = {
+    payer: partner,
+    virtualPool,
+    dammConfig,
+  };
+  await migrateToDammV2(svm, program, migrationParams);
 
   // withdraw migration fee
   // creator withdraw migration fee

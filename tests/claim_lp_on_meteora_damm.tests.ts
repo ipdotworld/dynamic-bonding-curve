@@ -1,6 +1,7 @@
 import { NATIVE_MINT } from "@solana/spl-token";
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { BN } from "bn.js";
+import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 import {
   BaseFee,
@@ -13,18 +14,17 @@ import {
   SwapParams,
 } from "./instructions";
 import {
-  createMeteoraMetadata,
-  creatorClaimLpDamm,
-  lockLpForCreatorDamm,
-  lockLpForPartnerDamm,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
-  partnerClaimLpDamm,
-} from "./instructions/meteoraMigration";
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
 import {
-  createDammConfig,
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
+  DammV2OperatorPermission,
   derivePoolAuthority,
+  encodePermissions,
   generateAndFund,
   MAX_SQRT_PRICE,
   MIN_SQRT_PRICE,
@@ -34,7 +34,7 @@ import {
 import { getVirtualPool } from "./utils/fetcher";
 import { Pool, VirtualCurveProgram } from "./utils/types";
 
-describe.skip("Claim lp on meteora dammm", () => {
+describe("Claim lp on meteora dammm", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;
@@ -46,6 +46,8 @@ describe.skip("Claim lp on meteora dammm", () => {
   let virtualPool: PublicKey;
   let virtualPoolState: Pool;
   let dammConfig: PublicKey;
+  let firstPosition: PublicKey;
+  let secondPosition: PublicKey;
 
   before(async () => {
     svm = startSvm();
@@ -55,6 +57,12 @@ describe.skip("Claim lp on meteora dammm", () => {
     user = generateAndFund(svm);
     poolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
+
+    await createDammV2Operator(svm, {
+      whitelistAddress: admin.publicKey,
+      admin,
+      permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+    });
   });
 
   it("Partner create config", async () => {
@@ -89,7 +97,7 @@ describe.skip("Claim lp on meteora dammm", () => {
       },
       activationType: 0,
       collectFeeMode: 1,
-      migrationOption: 0,
+      migrationOption: 1,
       tokenType: 0, // spl_token
       tokenDecimal: 6,
       migrationQuoteThreshold: new BN(LAMPORTS_PER_SOL * 5),
@@ -179,55 +187,41 @@ describe.skip("Claim lp on meteora dammm", () => {
     await swap(svm, program, params);
   });
 
-  it("Create meteora metadata", async () => {
-    await createMeteoraMetadata(svm, program, {
+  it("Create meteora damm v2 metadata", async () => {
+    await createMeteoraDammV2Metadata(svm, program, {
       payer: admin,
       virtualPool,
       config,
     });
   });
 
-  it("Migrate to Meteora Damm Pool", async () => {
+  it("Migrate to Meteora Damm V2 Pool", async () => {
     const poolAuthority = derivePoolAuthority();
-    dammConfig = await createDammConfig(svm, admin, poolAuthority);
-    const migrationParams: MigrateMeteoraParams = {
-      payer: admin,
+    dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+    const migrationParams: MigrateMeteoraDammV2Params = {
+      payer: partner,
       virtualPool,
       dammConfig,
     };
 
-    await migrateToMeteoraDamm(svm, program, migrationParams);
+    const result = await migrateToDammV2(svm, program, migrationParams);
+    firstPosition = result.firstPosition;
+    secondPosition = result.secondPosition;
   });
 
-  it("Partner lock LP", async () => {
-    await lockLpForPartnerDamm(svm, program, {
-      payer: partner,
-      dammConfig,
-      virtualPool,
-    });
+  it("Positions exist after migration", async () => {
+    // DAMM v2 migration automatically creates NFT positions (no LP lock/claim needed)
+    // Verify that positions were created on-chain
+    const firstPositionAccount = svm.getAccount(firstPosition);
+    const secondPositionAccount = svm.getAccount(secondPosition);
+
+    expect(firstPositionAccount).to.not.be.null;
+    expect(secondPositionAccount).to.not.be.null;
   });
 
-  it("Creator lock LP", async () => {
-    await lockLpForCreatorDamm(svm, program, {
-      payer: poolCreator,
-      dammConfig,
-      virtualPool,
-    });
-  });
-
-  it("Partner claim LP", async () => {
-    await partnerClaimLpDamm(svm, program, {
-      payer: partner,
-      dammConfig,
-      virtualPool,
-    });
-  });
-
-  it("Creator claim LP", async () => {
-    await creatorClaimLpDamm(svm, program, {
-      payer: poolCreator,
-      dammConfig,
-      virtualPool,
-    });
+  it("Virtual pool shows migration completed", async () => {
+    const updatedPoolState = getVirtualPool(svm, program, virtualPool);
+    // Migration progress should indicate completed state
+    expect(updatedPoolState.migrationProgress).to.be.greaterThan(0);
   });
 });
