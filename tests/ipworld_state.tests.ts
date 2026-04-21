@@ -52,22 +52,45 @@ describe("Step 2 — IpworldState admin instructions", () => {
   let program: VirtualCurveProgram;
   let ipworldStatePDA: PublicKey;
 
+  let admin: Keypair;
+
   before(async () => {
     svm = startSvm();
     program = createVirtualCurveProgram();
     ipworldStatePDA = deriveIpworldStateAddress();
+    admin = generateAndFund(svm);
 
-    // Verify startSvm() initialized IpworldState correctly
-    const state = decodeIpworldState(svm, ipworldStatePDA);
-    expect(state.authority).to.not.be.null;
+    // Overwrite ipworldState with known admin (same pattern as two_step_admin)
+    const { DYNAMIC_BONDING_CURVE_PROGRAM_ID } = await import("./utils/constants");
+    const [, ipworldBump] = PublicKey.findProgramAddressSync(
+      [Buffer.from("ipworld_state")],
+      DYNAMIC_BONDING_CURVE_PROGRAM_ID
+    );
+    const { createHash } = await import("crypto");
+    const discriminator = createHash("sha256")
+      .update("account:IpworldState")
+      .digest()
+      .subarray(0, 8);
+    const zeroKey = PublicKey.default;
+    const ipworldData = Buffer.alloc(137);
+    discriminator.copy(ipworldData, 0);
+    admin.publicKey.toBuffer().copy(ipworldData, 8);    // authority
+    admin.publicKey.toBuffer().copy(ipworldData, 40);   // admin
+    zeroKey.toBuffer().copy(ipworldData, 72);
+    zeroKey.toBuffer().copy(ipworldData, 104);
+    ipworldData.writeUInt8(ipworldBump, 136);
+    svm.setAccount(ipworldStatePDA, {
+      lamports: 1_000_000_000,
+      data: ipworldData,
+      owner: DYNAMIC_BONDING_CURVE_PROGRAM_ID,
+      executable: false,
+    });
   });
 
-  it("init_ipworld_state — PDA exists with correct fields from startSvm()", async () => {
-    // startSvm() already initializes IpworldState with authority = getSvmAuthority()
-    const authority = getSvmAuthority();
+  it("init_ipworld_state — PDA exists with correct fields", async () => {
     const state = decodeIpworldState(svm, ipworldStatePDA);
-    expect(state.authority.equals(authority.publicKey)).to.be.true;
-    expect(state.admin.equals(authority.publicKey)).to.be.true;
+    expect(state.authority.equals(admin.publicKey)).to.be.true;
+    expect(state.admin.equals(admin.publicKey)).to.be.true;
   });
 
   it("init_ipworld_state — double init should fail", async () => {
@@ -106,33 +129,48 @@ describe("Step 2 — IpworldState admin instructions", () => {
     expect(failed, "Double init should have failed").to.be.true;
   });
 
-  it.skip("update_ipworld_authority — admin can rotate authority (LiteSVM constraint debug needed)", async () => {
-    const authority = getSvmAuthority();
-    const newAuthority = Keypair.generate();
+  it("update_ipworld_authority — admin can rotate authority (2-step)", async () => {
+    const newAuthority = generateAndFund(svm);
 
-    const updateTx = await program.methods
+    // Step 1: Propose new authority
+    const proposeTx = await program.methods
       .updateIpworldAuthority(newAuthority.publicKey)
       .accountsPartial({
-        admin: authority.publicKey,
+        admin: admin.publicKey,
         ipworldState: ipworldStatePDA,
       })
       .transaction();
+    sendTransactionMaybeThrow(svm, proposeTx, [admin]);
 
-    sendTransactionMaybeThrow(svm, updateTx, [authority]);
+    let state = decodeIpworldState(svm, ipworldStatePDA);
+    expect(state.pendingAuthority.equals(newAuthority.publicKey)).to.be.true;
+    expect(state.authority.equals(admin.publicKey)).to.be.true; // unchanged yet
 
-    const state = decodeIpworldState(svm, ipworldStatePDA);
-    expect(state.authority.equals(newAuthority.publicKey)).to.be.true;
-
-    // Restore authority for subsequent tests by setting back
-    // Re-update to restoreAuthority (the new one is now the authority)
-    const restoreTx = await program.methods
-      .updateIpworldAuthority(authority.publicKey)
+    // Step 2: Accept as new authority
+    const acceptTx = await program.methods
+      .acceptIpworldAuthority()
       .accountsPartial({
-        admin: authority.publicKey,
+        newAuthority: newAuthority.publicKey,
         ipworldState: ipworldStatePDA,
       })
       .transaction();
-    sendTransactionMaybeThrow(svm, restoreTx, [authority]);
+    sendTransactionMaybeThrow(svm, acceptTx, [newAuthority]);
+
+    state = decodeIpworldState(svm, ipworldStatePDA);
+    expect(state.authority.equals(newAuthority.publicKey)).to.be.true;
+    expect(state.pendingAuthority.equals(PublicKey.default)).to.be.true;
+
+    // Restore: propose admin back as authority, then accept
+    const restoreProposeTx = await program.methods
+      .updateIpworldAuthority(admin.publicKey)
+      .accountsPartial({ admin: admin.publicKey, ipworldState: ipworldStatePDA })
+      .transaction();
+    sendTransactionMaybeThrow(svm, restoreProposeTx, [admin]);
+    const restoreAcceptTx = await program.methods
+      .acceptIpworldAuthority()
+      .accountsPartial({ newAuthority: admin.publicKey, ipworldState: ipworldStatePDA })
+      .transaction();
+    sendTransactionMaybeThrow(svm, restoreAcceptTx, [admin]);
   });
 
   it("update_ipworld_authority — wrong signer rejected", async () => {
@@ -156,19 +194,21 @@ describe("Step 2 — IpworldState admin instructions", () => {
     expect(failed, "Wrong signer should be rejected").to.be.true;
   });
 
-  it.skip("update_ipworld_admin — admin can transfer admin rights (LiteSVM constraint debug needed)", async () => {
-    const authority = getSvmAuthority();
+  it("update_ipworld_admin — admin can transfer admin rights (2-step)", async () => {
     const newAdmin = generateAndFund(svm);
 
     // Propose new admin
     const proposeTx = await program.methods
       .updateIpworldAdmin(newAdmin.publicKey)
       .accountsPartial({
-        admin: authority.publicKey,
+        admin: admin.publicKey,
         ipworldState: ipworldStatePDA,
       })
       .transaction();
-    sendTransactionMaybeThrow(svm, proposeTx, [authority]);
+    sendTransactionMaybeThrow(svm, proposeTx, [admin]);
+
+    let state = decodeIpworldState(svm, ipworldStatePDA);
+    expect(state.pendingAdmin.equals(newAdmin.publicKey)).to.be.true;
 
     // Accept as new admin
     const acceptTx = await program.methods
@@ -180,22 +220,22 @@ describe("Step 2 — IpworldState admin instructions", () => {
       .transaction();
     sendTransactionMaybeThrow(svm, acceptTx, [newAdmin]);
 
-    const state = decodeIpworldState(svm, ipworldStatePDA);
+    state = decodeIpworldState(svm, ipworldStatePDA);
     expect(state.admin.equals(newAdmin.publicKey)).to.be.true;
 
-    // Verify old admin is locked out
+    // Verify old admin is locked out (admin was the old admin, now newAdmin is admin)
     const anotherAuthority = Keypair.generate();
     const lockoutTx = await program.methods
       .updateIpworldAuthority(anotherAuthority.publicKey)
       .accountsPartial({
-        admin: authority.publicKey,
+        admin: admin.publicKey,
         ipworldState: ipworldStatePDA,
       })
       .transaction();
 
     let failed = false;
     try {
-      sendTransactionMaybeThrow(svm, lockoutTx, [authority]);
+      sendTransactionMaybeThrow(svm, lockoutTx, [admin]);
     } catch {
       failed = true;
     }
