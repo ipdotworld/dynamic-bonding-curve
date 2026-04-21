@@ -11,119 +11,196 @@
 
 import { describe, it, before } from "mocha";
 import { expect } from "chai";
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  LAMPORTS_PER_SOL,
-  sendAndConfirmTransaction,
-  Transaction,
-  TransactionInstruction,
-  SystemProgram,
-} from "@solana/web3.js";
-import { AnchorProvider, BN, Program, Wallet } from "@coral-xyz/anchor";
+import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import { LiteSVM } from "litesvm";
 import { createHash } from "crypto";
-import VirtualCurveIDL from "../target/idl/dynamic_bonding_curve.json";
-import { DynamicBondingCurve as VirtualCurve } from "../target/types/dynamic_bonding_curve";
+import {
+  createVirtualCurveProgram,
+  generateAndFund,
+  startSvm,
+} from "./utils";
+import { deriveIpworldStateAddress } from "./utils/accounts";
+import { DYNAMIC_BONDING_CURVE_PROGRAM_ID } from "./utils/constants";
+import { VirtualCurveProgram } from "./utils/types";
+import { sendTransactionMaybeThrow } from "./utils/common";
 
-const DBC_PROGRAM_ID = new PublicKey("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
-
-const connection = new Connection("http://127.0.0.1:8899", "confirmed");
-
-function anchorDisc(name: string): Buffer {
-  return createHash("sha256").update(name).digest().subarray(0, 8);
-}
-
-async function airdrop(pubkey: PublicKey, sol: number) {
-  const sig = await connection.requestAirdrop(pubkey, sol * LAMPORTS_PER_SOL);
-  await connection.confirmTransaction(sig, "confirmed");
-}
-
-function deriveIpworldState(): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync([Buffer.from("ipworld_state")], DBC_PROGRAM_ID);
+function decodeIpworldState(svm: LiteSVM, ipworldState: PublicKey) {
+  const account = svm.getAccount(ipworldState);
+  const data = Buffer.from(account.data);
+  // Layout: 8 disc + 32 authority + 32 admin + 32 pending_authority + 32 pending_admin + 1 bump
+  return {
+    authority: new PublicKey(data.subarray(8, 40)),
+    admin: new PublicKey(data.subarray(40, 72)),
+    pendingAuthority: new PublicKey(data.subarray(72, 104)),
+    pendingAdmin: new PublicKey(data.subarray(104, 136)),
+    bump: data[136],
+  };
 }
 
 describe("T-04: 2-Step Admin", () => {
+  let svm: LiteSVM;
   let currentAdmin: Keypair;
   let pendingAdmin: Keypair;
   let secondPendingAdmin: Keypair;
   let wrongSigner: Keypair;
   let ipworldState: PublicKey;
-  let program: Program<VirtualCurve>;
+  let program: VirtualCurveProgram;
 
   before(async () => {
-    // TODO: implement
-    // Steps:
-    //   1. Generate keypairs: currentAdmin, pendingAdmin, secondPendingAdmin, wrongSigner
-    //   2. Airdrop SOL to all keypairs that will sign txs
-    //   3. Init IpworldState with currentAdmin as initial admin
-    //      using init_ipworld_state instruction
-    //   4. Verify IpworldState.admin == currentAdmin.publicKey
+    svm = startSvm();
+    // startSvm() creates ipworldState with a random authority/admin.
+    // We need to set a KNOWN admin. Overwrite the ipworldState PDA.
+    currentAdmin = generateAndFund(svm);
+    pendingAdmin = generateAndFund(svm);
+    secondPendingAdmin = generateAndFund(svm);
+    wrongSigner = generateAndFund(svm);
+    program = createVirtualCurveProgram();
+
+    ipworldState = deriveIpworldStateAddress();
+    const [, ipworldBump] = PublicKey.findProgramAddressSync(
+      [Buffer.from("ipworld_state")],
+      DYNAMIC_BONDING_CURVE_PROGRAM_ID
+    );
+    const discriminator = createHash("sha256")
+      .update("account:IpworldState")
+      .digest()
+      .subarray(0, 8);
+    const zeroKey = PublicKey.default;
+    const ipworldData = Buffer.alloc(137);
+    discriminator.copy(ipworldData, 0);
+    currentAdmin.publicKey.toBuffer().copy(ipworldData, 8);   // authority
+    currentAdmin.publicKey.toBuffer().copy(ipworldData, 40);  // admin = currentAdmin
+    zeroKey.toBuffer().copy(ipworldData, 72);                 // pending_authority
+    zeroKey.toBuffer().copy(ipworldData, 104);                // pending_admin
+    ipworldData.writeUInt8(ipworldBump, 136);
+    svm.setAccount(ipworldState, {
+      lamports: 1_000_000_000,
+      data: ipworldData,
+      owner: DYNAMIC_BONDING_CURVE_PROGRAM_ID,
+      executable: false,
+    });
+
+    // Verify setup
+    const state = decodeIpworldState(svm, ipworldState);
+    expect(state.admin.equals(currentAdmin.publicKey)).to.be.true;
+    expect(state.pendingAdmin.equals(PublicKey.default)).to.be.true;
   });
 
   it("M-ADM-001: propose admin change stores pending_admin", async () => {
-    // TODO: implement
-    // Steps:
-    //   1. Call propose_new_admin (or transfer_admin) instruction with:
-    //      - signer: currentAdmin
-    //      - new_admin: pendingAdmin.publicKey
-    //      - accounts: [currentAdmin, ipworldState]
-    //   2. Fetch IpworldState account data
-    //   3. Decode the account and verify:
-    //      - ipworldState.pending_admin == pendingAdmin.publicKey
-    //      - ipworldState.admin == currentAdmin.publicKey (unchanged yet)
+    const tx = await program.methods
+      .updateIpworldAdmin(pendingAdmin.publicKey)
+      .accountsPartial({
+        admin: currentAdmin.publicKey,
+        ipworldState,
+      })
+      .transaction();
+
+    sendTransactionMaybeThrow(svm, tx, [currentAdmin]);
+
+    const state = decodeIpworldState(svm, ipworldState);
+    expect(state.pendingAdmin.equals(pendingAdmin.publicKey)).to.be.true;
+    expect(state.admin.equals(currentAdmin.publicKey)).to.be.true;
   });
 
   it("M-ADM-002: accept admin by pending_admin succeeds", async () => {
-    // TODO: implement
-    // Prerequisite: M-ADM-001 must have run (pending_admin is set to pendingAdmin)
-    // Steps:
-    //   1. Call accept_admin instruction with:
-    //      - signer: pendingAdmin (the current pending_admin)
-    //      - accounts: [pendingAdmin, ipworldState]
-    //   2. Fetch IpworldState account data
-    //   3. Decode and verify:
-    //      - ipworldState.admin == pendingAdmin.publicKey
-    //      - ipworldState.pending_admin is cleared (PublicKey.default or None)
-    //   4. Note: after this test, currentAdmin is no longer admin
+    const tx = await program.methods
+      .acceptIpworldAdmin()
+      .accountsPartial({
+        newAdmin: pendingAdmin.publicKey,
+        ipworldState,
+      })
+      .transaction();
+
+    sendTransactionMaybeThrow(svm, tx, [pendingAdmin]);
+
+    const state = decodeIpworldState(svm, ipworldState);
+    expect(state.admin.equals(pendingAdmin.publicKey)).to.be.true;
+    expect(state.pendingAdmin.equals(PublicKey.default)).to.be.true;
   });
 
   it("M-ADM-003: accept admin by non-pending rejected", async () => {
-    // TODO: implement
-    // Prerequisite: pendingAdmin is now admin (from M-ADM-002)
-    // Steps:
-    //   1. Call propose_new_admin with pendingAdmin (new current admin) proposing secondPendingAdmin
-    //   2. Attempt accept_admin with wrongSigner (not secondPendingAdmin)
-    //   3. Expect: error matching /Unauthorized|custom program error/
-    //   4. Verify IpworldState.admin is still pendingAdmin.publicKey (unchanged)
+    // pendingAdmin is now admin (from M-ADM-002). Propose secondPendingAdmin.
+    const proposeTx = await program.methods
+      .updateIpworldAdmin(secondPendingAdmin.publicKey)
+      .accountsPartial({
+        admin: pendingAdmin.publicKey,
+        ipworldState,
+      })
+      .transaction();
+    sendTransactionMaybeThrow(svm, proposeTx, [pendingAdmin]);
+
+    // wrongSigner tries to accept — should fail
+    const acceptTx = await program.methods
+      .acceptIpworldAdmin()
+      .accountsPartial({
+        newAdmin: wrongSigner.publicKey,
+        ipworldState,
+      })
+      .transaction();
+
+    let failed = false;
+    try {
+      sendTransactionMaybeThrow(svm, acceptTx, [wrongSigner]);
+    } catch (e: any) {
+      failed = true;
+      expect(e.message).to.match(/Unauthorized|custom program error/);
+    }
+    expect(failed, "accept by non-pending should have failed").to.be.true;
+
+    // Admin unchanged
+    const state = decodeIpworldState(svm, ipworldState);
+    expect(state.admin.equals(pendingAdmin.publicKey)).to.be.true;
   });
 
   it("M-ADM-004: null pubkey rejected for admin", async () => {
-    // TODO: implement
-    // Background:
-    //   Proposing PublicKey.default (all zeros) as new admin would lock the protocol
-    //   by making it impossible to accept (no one holds the zero private key).
-    //   The program should reject this.
-    //
-    // Steps:
-    //   1. Call propose_new_admin with new_admin == PublicKey.default
-    //   2. Expect: error (program should validate new_admin != default pubkey)
-    //   3. Verify IpworldState.pending_admin is NOT set to default pubkey
+    // Proposing PublicKey.default should fail — would lock the protocol
+    const tx = await program.methods
+      .updateIpworldAdmin(PublicKey.default)
+      .accountsPartial({
+        admin: pendingAdmin.publicKey,
+        ipworldState,
+      })
+      .transaction();
+
+    let failed = false;
+    try {
+      sendTransactionMaybeThrow(svm, tx, [pendingAdmin]);
+    } catch (e: any) {
+      failed = true;
+      expect(e.message).to.match(/InvalidAdmin|custom program error/);
+    }
+    expect(failed, "null pubkey proposal should have failed").to.be.true;
   });
 
   it("M-ADM-005: propose overwrites previous pending", async () => {
-    // TODO: implement
-    // Background:
-    //   If admin proposes A then proposes B before A accepts,
-    //   only B should be the pending_admin (A's opportunity is gone).
-    //
-    // Steps:
-    //   1. Call propose_new_admin with new_admin == pendingAdmin
-    //   2. Before pendingAdmin accepts, call propose_new_admin again with secondPendingAdmin
-    //   3. Fetch IpworldState account data
-    //   4. Verify:
-    //      - ipworldState.pending_admin == secondPendingAdmin.publicKey
-    //      - (pendingAdmin's pending status is overwritten)
-    //   5. Verify pendingAdmin can no longer accept (attempt should fail)
+    // From M-ADM-003: secondPendingAdmin is pending. Now propose wrongSigner instead.
+    const tx = await program.methods
+      .updateIpworldAdmin(wrongSigner.publicKey)
+      .accountsPartial({
+        admin: pendingAdmin.publicKey,
+        ipworldState,
+      })
+      .transaction();
+    sendTransactionMaybeThrow(svm, tx, [pendingAdmin]);
+
+    const state = decodeIpworldState(svm, ipworldState);
+    expect(state.pendingAdmin.equals(wrongSigner.publicKey)).to.be.true;
+
+    // secondPendingAdmin can no longer accept
+    const acceptTx = await program.methods
+      .acceptIpworldAdmin()
+      .accountsPartial({
+        newAdmin: secondPendingAdmin.publicKey,
+        ipworldState,
+      })
+      .transaction();
+
+    let failed = false;
+    try {
+      sendTransactionMaybeThrow(svm, acceptTx, [secondPendingAdmin]);
+    } catch (e: any) {
+      failed = true;
+    }
+    expect(failed, "old pending admin should not be able to accept").to.be.true;
   });
 });

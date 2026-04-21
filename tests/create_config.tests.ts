@@ -133,7 +133,7 @@ describe("Create config", () => {
     await createConfig(svm, program, params);
   });
 
-  it.skip("Fail to create config less than min base fee (25 bps)", async () => {
+  it("Fail to create config less than min base fee (25 bps)", async () => {
     const baseFee: BaseFee = {
       cliffFeeNumerator: new BN(2_499_999),
       firstFactor: 0,
@@ -151,9 +151,10 @@ describe("Create config", () => {
       instructionParams,
     };
 
-    const errorCode = getDbcProgramErrorCodeHexString("ExceedMaxFeeBps");
+    // PoolError::ExceedMaxFeeBps = 6003 = 0x1773
+    // Note: IDL only contains IpworldAuthError; PoolError codes use hardcoded hex
     await expectThrowsAsync(async () => {
       await createConfig(svm, program, params);
-    }, errorCode);
+    }, "0x1773");
   });
 });

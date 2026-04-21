@@ -86,13 +86,19 @@ function sendTx(svm: LiteSVM, ixs: TransactionInstruction[], signers: Keypair[])
   return svm.sendTransaction(tx);
 }
 
-function sendTxMayFail(svm: LiteSVM, ixs: TransactionInstruction[], signers: Keypair[]): boolean {
+function sendTxExpectFail(svm: LiteSVM, ixs: TransactionInstruction[], signers: Keypair[]): void {
+  let succeeded = false;
   try {
     sendTx(svm, ixs, signers);
-    return true;
+    succeeded = true;
   } catch {
-    return false;
+    // Expected failure
   }
+  expect(succeeded, "Transaction should have failed but succeeded").to.be.false;
+}
+
+function sendTxExpectSuccess(svm: LiteSVM, ixs: TransactionInstruction[], signers: Keypair[]): void {
+  sendTx(svm, ixs, signers); // Let errors propagate naturally
 }
 
 /**
@@ -288,8 +294,7 @@ describe("T-06: Hook P2P Blocking", () => {
     const p2pIx = buildTransferWithHook(
       buyer1Ata, mint.publicKey, buyer2Ata, buyer1.publicKey, buyAmount / 2n, DECIMALS
     );
-    const succeeded = sendTxMayFail(svm, [p2pIx], [buyer1]);
-    expect(succeeded, "P2P transfer should have failed").to.be.false;
+    sendTxExpectFail(svm, [p2pIx], [buyer1]);
   });
 
   it("M-HOOK-002: Vault transfer allowed (buy > 5% is ok)", () => {
@@ -308,7 +313,6 @@ describe("T-06: Hook P2P Blocking", () => {
     const transferIx = buildTransferWithHook(
       poolVault, mint.publicKey, whaleAta, vaultOwner.publicKey, whaleAmount, DECIMALS
     );
-    const succeeded = sendTxMayFail(svm, [transferIx], [vaultOwner]);
-    expect(succeeded, "10% vault transfer should succeed (no cap)").to.be.true;
+    sendTxExpectSuccess(svm, [transferIx], [vaultOwner]);
   });
 });
