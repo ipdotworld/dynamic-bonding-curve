@@ -4,6 +4,7 @@ use crate::{state::*, token::transfer_lamports_from_pool_account, *};
 #[event_cpi]
 #[derive(Accounts)]
 pub struct ClaimPartnerPoolCreationFeeCtx<'info> {
+    #[account(has_one = fee_claimer)]
     pub config: AccountLoader<'info, PoolConfig>,
 
     #[account(mut, has_one = config)]

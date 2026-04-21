@@ -9,6 +9,48 @@ use crate::{
     ConfigParameters, LockedVestingParams, SwapParameters, SwapParameters2,
 };
 
+/// IpworldState initialized
+#[event]
+pub struct EvtIpworldStateInitialized {
+    pub admin: Pubkey,
+    pub authority: Pubkey,
+}
+
+/// Admin transfer proposed
+#[event]
+pub struct EvtAdminProposed {
+    pub old_admin: Pubkey,
+    pub pending_admin: Pubkey,
+}
+
+/// Admin transfer accepted
+#[event]
+pub struct EvtAdminAccepted {
+    pub old_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
+/// Authority rotation proposed
+#[event]
+pub struct EvtAuthorityProposed {
+    pub old_authority: Pubkey,
+    pub pending_authority: Pubkey,
+}
+
+/// Authority rotation accepted
+#[event]
+pub struct EvtAuthorityAccepted {
+    pub old_authority: Pubkey,
+    pub new_authority: Pubkey,
+}
+
+/// IP owner verified for a pool
+#[event]
+pub struct EvtTokenVerified {
+    pub pool: Pubkey,
+    pub ip_owner: Pubkey,
+}
+
 /// Create partner metadata
 #[event]
 pub struct EvtPartnerMetadata {
@@ -203,4 +245,12 @@ pub struct EvtClaimProtocolLiquidityMigrationFee {
     pub pool: Pubkey,
     pub token_base_amount: u64,
     pub token_quote_amount: u64,
+}
+
+#[event]
+pub struct EvtMigrateDammV2 {
+    pub pool: Pubkey,
+    pub config: Pubkey,
+    pub damm_v2_pool: Pubkey,
+    pub timestamp: u64,
 }

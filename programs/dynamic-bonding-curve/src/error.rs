@@ -218,6 +218,33 @@ pub enum PoolError {
 
     #[msg("Trade authorization has expired")]
     TradeAuthExpired,
+
+    #[msg("Must claim accumulated fees before transferring creator role")]
+    UnclaimedFees,
+
+    #[msg("Invalid authority address")]
+    InvalidAuthority,
+
+    #[msg("No pending admin proposal")]
+    NoPendingAdmin,
+
+    #[msg("No pending authority proposal")]
+    NoPendingAuthority,
+
+    #[msg("Invalid sqrt price")]
+    InvalidSqrtPrice,
+
+    #[msg("IP treasury address is already set and cannot be changed")]
+    IpTreasuryAlreadySet,
+
+    #[msg("Token is not verified — TokenVerification PDA does not exist")]
+    NotVerified,
+
+    #[msg("No pending IP owner transfer proposal")]
+    NoPendingIpOwner,
+
+    #[msg("No pending referral change proposal")]
+    NoPendingReferral,
 }
 
 impl From<ProtozolZapError> for PoolError {

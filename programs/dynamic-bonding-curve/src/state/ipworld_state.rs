@@ -7,11 +7,15 @@ pub struct IpworldState {
     /// Cold key that can rotate authority. Starts as deployer wallet,
     /// upgrade to multisig later via update_ipworld_admin.
     pub admin: Pubkey,
+    /// Pending authority for 2-step transfer. Zero means no pending transfer.
+    pub pending_authority: Pubkey,
+    /// Pending admin for 2-step transfer. Zero means no pending transfer.
+    pub pending_admin: Pubkey,
     pub bump: u8,
 }
 
 impl IpworldState {
     pub const SEED: &'static [u8] = b"ipworld_state";
-    /// 8 (discriminator) + 32 + 32 + 1 = 73
-    pub const LEN: usize = 8 + 32 + 32 + 1;
+    /// 8 (discriminator) + 32 + 32 + 32 + 32 + 1 = 137
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 1;
 }

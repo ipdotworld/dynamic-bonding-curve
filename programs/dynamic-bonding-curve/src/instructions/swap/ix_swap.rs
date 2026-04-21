@@ -145,9 +145,21 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
     ctx: Context<'_, '_, 'c, 'info, SwapCtx<'info>>,
     params: SwapParameters2,
 ) -> Result<()> {
-    // --- Step 7: Verify backend-signed TradeAuth ---
-    #[cfg(not(feature = "skip-trade-auth"))]
-    {
+    let SwapParameters2 {
+        amount_0,
+        amount_1,
+        swap_mode,
+        ..
+    } = params;
+
+    let swap_mode = SwapMode::try_from(swap_mode).map_err(|_| PoolError::TypeCastFailed)?;
+
+    let trade_direction = ctx.accounts.get_trade_direction();
+
+    // --- Verify backend-signed TradeAuth (buys only) ---
+    // Sells (BaseToQuote) are always allowed so users can exit even if
+    // the auth backend is unavailable.
+    if trade_direction == TradeDirection::QuoteToBase {
         let trade_auth: TradeAuth = verify_authority_sig(
             &ctx.accounts.instructions_sysvar,
             &ctx.accounts.ipworld_state,
@@ -162,17 +174,6 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
             PoolError::TradeAuthExpired
         );
     }
-
-    let SwapParameters2 {
-        amount_0,
-        amount_1,
-        swap_mode,
-        ..
-    } = params;
-
-    let swap_mode = SwapMode::try_from(swap_mode).map_err(|_| PoolError::TypeCastFailed)?;
-
-    let trade_direction = ctx.accounts.get_trade_direction();
     let (
         token_in_mint,
         token_out_mint,

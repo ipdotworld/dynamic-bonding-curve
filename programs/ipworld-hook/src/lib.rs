@@ -14,9 +14,6 @@ use errors::HookError;
 
 declare_id!("HooK1111111111111111111111111111111111111111");
 
-/// Maximum ownership per wallet: 5% = 500 basis points
-const MAX_OWNERSHIP_BPS: u64 = 500;
-const BPS_DENOMINATOR: u64 = 10_000;
 
 #[program]
 pub mod ipworld_hook {
@@ -82,31 +79,16 @@ pub mod ipworld_hook {
 
     /// Transfer hook handler — called by Token-2022 on every transfer.
     /// Routed here via fallback() because Token-2022 uses SPL discriminator.
-    pub fn transfer_hook(ctx: Context<TransferHook>, amount: u64) -> Result<()> {
+    pub fn transfer_hook(ctx: Context<TransferHook>, _amount: u64) -> Result<()> {
         let cfg = &ctx.accounts.hook_config;
         let src = ctx.accounts.source_token.key();
         let dst = ctx.accounts.destination_token.key();
 
-        // Check 1: One side must be the curve vault (no P2P)
+        // Only check: one side must be the curve vault (no P2P transfers)
         require!(
             src == cfg.pool_vault || dst == cfg.pool_vault,
             HookError::TransferNotThroughCurve
         );
-
-        // Check 2: Ownership cap on buys (destination != vault = buying)
-        // Uses u128 to avoid overflow: balance * 10000 can exceed u64::MAX
-        // for tokens with large supply + high decimals
-        if dst != cfg.pool_vault {
-            // Token-2022 credits destination BEFORE calling the hook,
-            // so destination_token.amount already includes the transfer amount.
-            let dst_balance = ctx.accounts.destination_token.amount as u128;
-            let supply = ctx.accounts.mint.supply as u128;
-            require!(
-                dst_balance * (BPS_DENOMINATOR as u128)
-                    <= (MAX_OWNERSHIP_BPS as u128) * supply,
-                HookError::ExceedsMaxOwnership
-            );
-        }
 
         Ok(())
     }

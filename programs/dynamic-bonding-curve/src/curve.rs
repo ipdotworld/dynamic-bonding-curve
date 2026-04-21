@@ -66,11 +66,11 @@ pub fn get_delta_amount_base_unsigned_unchecked(
     round: Rounding,
 ) -> Result<U256> {
     let numerator_1 = U256::from(liquidity);
-    let numerator_2 = U256::from(upper_sqrt_price - lower_sqrt_price);
+    let numerator_2 = U256::from(upper_sqrt_price.checked_sub(lower_sqrt_price).ok_or(PoolError::MathOverflow)?);
 
     let denominator = U256::from(lower_sqrt_price).safe_mul(U256::from(upper_sqrt_price))?;
 
-    assert!(denominator > U256::ZERO);
+    require!(denominator > U256::ZERO, PoolError::MathOverflow);
     let result = mul_div_u256(numerator_1, numerator_2, denominator, round)
         .ok_or_else(|| PoolError::MathOverflow)?;
     return Ok(result);
@@ -113,7 +113,7 @@ pub fn get_delta_amount_quote_unsigned_unchecked(
     round: Rounding,
 ) -> Result<U256> {
     let liquidity = U256::from(liquidity);
-    let delta_sqrt_price = U256::from(upper_sqrt_price - lower_sqrt_price);
+    let delta_sqrt_price = U256::from(upper_sqrt_price.checked_sub(lower_sqrt_price).ok_or(PoolError::MathOverflow)?);
     let prod = liquidity.safe_mul(delta_sqrt_price)?;
 
     match round {
@@ -137,8 +137,8 @@ pub fn get_next_sqrt_price_from_input(
     amount_in: u64,
     base_for_quote: bool,
 ) -> Result<u128> {
-    assert!(sqrt_price > 0);
-    assert!(liquidity > 0);
+    require!(sqrt_price > 0, PoolError::InvalidSqrtPrice);
+    require!(liquidity > 0, PoolError::InsufficientLiquidity);
 
     // round to make sure that we don't pass the target price
     if base_for_quote {
@@ -154,8 +154,8 @@ pub fn get_next_sqrt_price_from_output(
     amount_out: u64,
     base_for_quote: bool,
 ) -> Result<u128> {
-    assert!(sqrt_price > 0);
-    assert!(liquidity > 0);
+    require!(sqrt_price > 0, PoolError::InvalidSqrtPrice);
+    require!(liquidity > 0, PoolError::InsufficientLiquidity);
 
     if base_for_quote {
         get_next_sqrt_price_from_quote_amount_out_rounding_down(sqrt_price, liquidity, amount_out)

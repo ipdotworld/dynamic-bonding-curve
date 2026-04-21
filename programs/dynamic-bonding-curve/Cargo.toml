@@ -15,8 +15,6 @@ no-log-ix-name = []
 cpi = ["no-entrypoint"]
 default = []
 local = []
-skip-launch-auth = []
-skip-trade-auth = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]

@@ -44,6 +44,18 @@ pub fn verify_authority_sig<T: BorshDeserialize>(
     let num_signatures = ix_data[0];
     require!(num_signatures == 1, IpworldAuthError::InvalidEd25519Data);
 
+    // Validate that all data components are inline (0xFFFF = read from this instruction).
+    // Without this check, an attacker can point instruction_index to a different ix
+    // containing their own pubkey, while embedding the authority pubkey at pubkey_offset
+    // in the Ed25519 ix data — bypassing authority verification entirely.
+    let sig_ix_index = u16::from_le_bytes([ix_data[4], ix_data[5]]);
+    let pubkey_ix_index = u16::from_le_bytes([ix_data[8], ix_data[9]]);
+    let msg_ix_index = u16::from_le_bytes([ix_data[14], ix_data[15]]);
+
+    require!(sig_ix_index == 0xFFFF, IpworldAuthError::InvalidEd25519Data);
+    require!(pubkey_ix_index == 0xFFFF, IpworldAuthError::InvalidEd25519Data);
+    require!(msg_ix_index == 0xFFFF, IpworldAuthError::InvalidEd25519Data);
+
     // Ed25519 instruction header layout (per signature):
     //   [0]: num_signatures, [1]: padding
     //   [2..4]: signature_offset, [4..6]: signature_instruction_index

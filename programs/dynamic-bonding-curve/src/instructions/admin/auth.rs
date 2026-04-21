@@ -16,12 +16,6 @@ pub mod treasury {
     pub const ID: Pubkey = pubkey!("6aYhxiNGmG8AyU25rh2R7iFu4pBrqnQHpNUGhmsEXRcm");
 }
 
-#[cfg(feature = "local")]
-pub fn assert_eq_admin(_admin: Pubkey) -> bool {
-    true
-}
-
-#[cfg(not(feature = "local"))]
 pub fn assert_eq_admin(admin: Pubkey) -> bool {
     crate::admin::admin::ADMINS
         .iter()

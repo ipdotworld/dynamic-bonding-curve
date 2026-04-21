@@ -18,7 +18,7 @@ pub struct PartnerWithdrawSurplusCtx<'info> {
     )]
     pub pool_authority: UncheckedAccount<'info>,
 
-    #[account(has_one = quote_mint)]
+    #[account(has_one = quote_mint, has_one = fee_claimer)]
     pub config: AccountLoader<'info, PoolConfig>,
 
     #[account(
