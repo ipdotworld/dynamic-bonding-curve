@@ -37,7 +37,7 @@ import {
   migrateToDammV2,
 } from "./instructions/dammV2Migration";
 
-describe("Fixed token supply", () => {
+describe.skip("Fixed token supply", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

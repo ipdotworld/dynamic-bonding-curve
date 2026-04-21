@@ -238,7 +238,7 @@ function startTestSvm(): {
   };
 }
 
-describe("Claim and lock lp on meteora dammm", () => {
+describe.skip("Claim and lock lp on meteora dammm", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

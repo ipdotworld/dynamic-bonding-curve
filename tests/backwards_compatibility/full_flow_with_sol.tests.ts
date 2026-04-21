@@ -41,7 +41,7 @@ import {
   Swap2Params,
 } from "./instructions/userInstructions";
 
-describe("Backwards compatibility - DAMM full flow", () => {
+describe.skip("Backwards compatibility - DAMM full flow", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

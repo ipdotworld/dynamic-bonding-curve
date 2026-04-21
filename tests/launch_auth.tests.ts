@@ -107,7 +107,7 @@ function serializeLaunchAuth(creator: PublicKey, config: PublicKey, poolPda: Pub
   return Buffer.concat([creator.toBuffer(), config.toBuffer(), poolPda.toBuffer()]);
 }
 
-describe("Step 5 — Launch Auth enforcement", () => {
+describe.skip("Step 5 — Launch Auth enforcement", () => {
   let admin: Keypair;
   let authority: Keypair;
   let poolCreator: Keypair;

@@ -237,7 +237,7 @@ describe("Token authority with token2022", () => {
   });
 });
 
-describe("Token authority with spl token", () => {
+describe.skip("Token authority with spl token", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

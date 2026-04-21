@@ -213,7 +213,7 @@ describe("Migrate to damm v2", () => {
       1 // Timestamp
     );
     const migrationParams: MigrateMeteoraDammV2Params = {
-      payer: admin,
+      payer: partner,
       virtualPool,
       dammConfig,
     };

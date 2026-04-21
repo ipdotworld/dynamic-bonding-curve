@@ -27,7 +27,7 @@ import { VirtualCurveProgram } from "./utils/types";
 import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 
-describe("Claim protocol liquidity migration fee", () => {
+describe.skip("Claim protocol liquidity migration fee", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

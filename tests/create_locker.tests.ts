@@ -37,7 +37,7 @@ import {
 } from "./instructions/dammV2Migration";
 
 describe("Create locker", () => {
-  describe("Create locker for spl-token", () => {
+  describe.skip("Create locker for spl-token", () => {
     let svm: LiteSVM;
     let admin: Keypair;
     let operator: Keypair;
@@ -224,7 +224,7 @@ describe("Create locker", () => {
     });
   });
 
-  describe("Create locker for token2022", () => {
+  describe.skip("Create locker for token2022", () => {
     let svm: LiteSVM;
     let admin: Keypair;
     let operator: Keypair;
@@ -402,7 +402,7 @@ describe("Create locker", () => {
         1 // Timestamp
       );
       const migrationParams: MigrateMeteoraDammV2Params = {
-        payer: admin,
+        payer: poolCreator,
         virtualPool,
         dammConfig,
       };

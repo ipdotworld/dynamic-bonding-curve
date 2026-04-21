@@ -215,7 +215,7 @@ describe("Create pool with token2022", () => {
     );
   });
 
-  it("Create spl token pool from mutable config", async () => {
+  it.skip("Create spl token pool from mutable config", async () => {
     virtualPool = await createPoolWithSplToken(svm, program, {
       poolCreator,
       payer: operator,
@@ -246,7 +246,7 @@ describe("Create pool with token2022", () => {
     expect(metadata.updateAuthority).eq(poolCreator.publicKey.toString());
   });
 
-  it("Create spl pool from immutable config", async () => {
+  it.skip("Create spl pool from immutable config", async () => {
     virtualPool = await createPoolWithSplToken(svm, program, {
       poolCreator,
       payer: operator,

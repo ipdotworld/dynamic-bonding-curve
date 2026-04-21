@@ -409,7 +409,7 @@ async function fullFlow(
   const poolAuthority = derivePoolAuthority();
   const dammConfig = await createDammV2DynamicConfig(svm, admin, poolAuthority);
   const migrationParams: MigrateMeteoraDammV2Params = {
-    payer: admin,
+    payer: partner,
     virtualPool,
     dammConfig,
   };

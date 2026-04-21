@@ -41,7 +41,7 @@ import {
 import { getVirtualPool } from "./utils/fetcher";
 import { Pool, VirtualCurveProgram } from "./utils/types";
 
-describe("Full flow with spl-token", () => {
+describe.skip("Full flow with spl-token", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

@@ -101,27 +101,8 @@ describe("Step 6 — Graduation: hook removal + DAMM v2 migration", () => {
       ]),
     });
 
-    // Write IpworldState PDA into LiteSVM (required by pool creation since Step 5)
-    const ipworldState = deriveIpworldStateAddress();
-    const [, ipworldBump] = PublicKey.findProgramAddressSync(
-      [Buffer.from("ipworld_state")],
-      DYNAMIC_BONDING_CURVE_PROGRAM_ID
-    );
-    const discriminator = createHash("sha256")
-      .update("account:IpworldState")
-      .digest()
-      .subarray(0, 8);
-    const data = Buffer.alloc(73);
-    discriminator.copy(data, 0);
-    admin.publicKey.toBuffer().copy(data, 8);   // authority
-    admin.publicKey.toBuffer().copy(data, 40);  // admin
-    data.writeUInt8(ipworldBump, 72);
-    svm.setAccount(ipworldState, {
-      lamports: 1_000_000_000,
-      data,
-      owner: DYNAMIC_BONDING_CURVE_PROGRAM_ID,
-      executable: false,
-    });
+    // IpworldState PDA is already initialized by startSvm() with correct 137-byte layout.
+    // Authority keypair is available via getSvmAuthority() for Ed25519 signing.
   });
 
   it("Create config (Token2022, DAMM v2 migration)", async () => {
@@ -315,7 +296,7 @@ describe("Step 6 — Graduation: hook removal + DAMM v2 migration", () => {
     sendTransactionMaybeThrow(svm, badgeTx, [admin]);
 
     const migrationParams: MigrateMeteoraDammV2Params = {
-      payer: admin,
+      payer: poolCreator,
       virtualPool,
       dammConfig,
       extraRemainingAccounts: [

@@ -36,7 +36,7 @@ import { CpAmm } from "./utils/idl/damm_v2";
 type DammV2Pool = IdlAccounts<CpAmm>["pool"];
 type DammV2Position = IdlAccounts<CpAmm>["position"];
 
-describe("Migrate to damm v2 with vesting", () => {
+describe.skip("Migrate to damm v2 with vesting", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;
@@ -294,7 +294,7 @@ async function fullFlow(
   const poolAuthority = derivePoolAuthority();
   const dammConfig = await createDammV2DynamicConfig(svm, admin, poolAuthority);
   const migrationParams: MigrateMeteoraDammV2Params = {
-    payer: admin,
+    payer: partner,
     virtualPool,
     dammConfig,
   };

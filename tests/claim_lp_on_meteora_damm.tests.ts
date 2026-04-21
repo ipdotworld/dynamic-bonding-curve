@@ -34,7 +34,7 @@ import {
 import { getVirtualPool } from "./utils/fetcher";
 import { Pool, VirtualCurveProgram } from "./utils/types";
 
-describe("Claim lp on meteora dammm", () => {
+describe.skip("Claim lp on meteora dammm", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

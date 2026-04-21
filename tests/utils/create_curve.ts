@@ -507,7 +507,7 @@ export function designCurve(
     tokenUpdateAuthority: 0,
     migrationFee,
     migratedPoolFee: {
-      collectFeeMode: 1,
+      collectFeeMode: 0,
       dynamicFee: 0,
       poolFeeBps: 0,
     },
@@ -683,7 +683,7 @@ export function designGraphCurve(
       creatorFeePercentage: 0,
     },
     migratedPoolFee: {
-      collectFeeMode: 1,
+      collectFeeMode: 0,
       dynamicFee: 0,
       poolFeeBps: 0,
     },

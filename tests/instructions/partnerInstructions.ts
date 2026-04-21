@@ -163,20 +163,42 @@ export async function createConfig(
   const creatorShare = instructionParams.creatorShare ?? 100000;
   const tokenAirdropShare = instructionParams.tokenAirdropShare ?? 50000;
 
-  // Ensure collectFeeMode is OutputToken (1), not QuoteToken (0)
-  // The program only accepts OutputToken mode for new pools
+  // Ensure collectFeeMode is OutputToken (1), not QuoteToken (0) for most
+  // pools. Exception: fee rate limiter (baseFeeMode=2) requires QuoteToken
+  // mode — keep collectFeeMode=0 in that case.
+  const isRateLimiterMode = instructionParams.poolFees.baseFee.baseFeeMode === 2;
   const collectFeeMode =
-    instructionParams.collectFeeMode === 0 ? 1 : instructionParams.collectFeeMode;
+    instructionParams.collectFeeMode === 0 && !isRateLimiterMode
+      ? 1
+      : instructionParams.collectFeeMode;
 
   // MigrationOption 0 (MeteoraDamm) is disabled — redirect to DammV2 (1)
   const migrationOption =
     instructionParams.migrationOption === 0 ? 1 : instructionParams.migrationOption;
+
+  // SPL Token pools are disabled (S-02) — force tokenType to Token2022 (1)
+  const tokenType =
+    instructionParams.tokenType === 0 ? 1 : instructionParams.tokenType;
+
+  // Normalize migratedPoolFee: when migrationFeeOption != Customizable (1),
+  // the program requires ALL migratedPoolFee fields to be zero.
+  // When poolFeeBps > 0, ensure it's in valid range [10, 1000].
+  const rawMPF = instructionParams.migratedPoolFee;
+  const migratedPoolFee =
+    rawMPF.poolFeeBps === 0
+      ? { collectFeeMode: 0, dynamicFee: 0, poolFeeBps: 0 }
+      : rawMPF;
+
+  const poolFees = instructionParams.poolFees;
 
   const transaction = await program.methods
     .createConfig({
       ...instructionParams,
       collectFeeMode,
       migrationOption,
+      tokenType,
+      migratedPoolFee,
+      poolFees,
       ipOwnerShare,
       airdropShare,
       referralShare,

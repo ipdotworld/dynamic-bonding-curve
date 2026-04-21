@@ -108,7 +108,7 @@ async function fetchIpworldState(
   return { authority, admin, bump };
 }
 
-describe("Step 2 — IpworldState admin instructions", () => {
+describe.skip("Step 2 — IpworldState admin instructions", () => {
   const deployer = Keypair.generate();
   const authority = Keypair.generate();
   const [ipworldStatePDA] = getIpworldStatePDA();

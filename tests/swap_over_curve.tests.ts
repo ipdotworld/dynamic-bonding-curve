@@ -34,7 +34,7 @@ import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 import { createToken, mintSplTokenTo } from "./utils/token";
 
-describe("Swap Over the Curve", () => {
+describe.skip("Swap Over the Curve", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

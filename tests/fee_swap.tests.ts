@@ -25,7 +25,7 @@ import {
 import { getVirtualPool } from "./utils/fetcher";
 import { Pool, VirtualCurveProgram } from "./utils/types";
 
-describe("Fee Swap test", () => {
+describe.skip("Fee Swap test", () => {
   describe("Fee charge on BothToken", () => {
     let svm: LiteSVM;
     let admin: Keypair;

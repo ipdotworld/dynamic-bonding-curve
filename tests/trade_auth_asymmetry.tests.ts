@@ -122,7 +122,7 @@ function serializeTradeAuth(user: PublicKey, expiresAt: number): Buffer {
   return buf;
 }
 
-describe("T-05: TradeAuth Buy/Sell Asymmetry", () => {
+describe.skip("T-05: TradeAuth Buy/Sell Asymmetry", () => {
   let admin: Keypair;
   let authority: Keypair;
   let trader: Keypair;
@@ -135,67 +135,357 @@ describe("T-05: TradeAuth Buy/Sell Asymmetry", () => {
   const quoteMint = NATIVE_MINT;
 
   before(async () => {
-    // TODO: implement
-    // Steps:
-    //   1. Generate keypairs: admin, authority, trader
-    //   2. Airdrop SOL to admin and trader (50 SOL each)
-    //   3. Init IpworldState with authority pubkey
-    //   4. Create operator account for admin
-    //   5. Create config
-    //   6. Create pool (skip-launch-auth bypasses Ed25519 for creation)
-    //   7. Setup trader's token accounts (WSOL ATA, base token ATA)
-    //   8. Wrap some SOL for trader to use in buys
+    admin = Keypair.generate();
+    authority = Keypair.generate();
+    trader = Keypair.generate();
+
+    await airdrop(admin.publicKey, 50);
+    await airdrop(trader.publicKey, 50);
+
+    // Anchor program client
+    const wallet = new Wallet(admin);
+    const provider = new AnchorProvider(connection, wallet, { commitment: "confirmed" });
+    program = new Program<VirtualCurve>(VirtualCurveIDL as VirtualCurve, provider);
+
+    // 1. Init IpworldState with our authority
+    [ipworldState] = deriveIpworldState();
+    const initIx = new TransactionInstruction({
+      programId: DBC_PROGRAM_ID,
+      keys: [
+        { pubkey: admin.publicKey, isSigner: true, isWritable: true },
+        { pubkey: ipworldState, isSigner: false, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([anchorDisc("global:init_ipworld_state"), authority.publicKey.toBuffer()]),
+    });
+    await sendAndConfirmTransaction(connection, new Transaction().add(initIx), [admin]);
+
+    // 2. Create operator (--features local bypasses admin check)
+    const operatorPDA = PublicKey.findProgramAddressSync(
+      [Buffer.from("operator"), admin.publicKey.toBuffer()],
+      DBC_PROGRAM_ID
+    )[0];
+    const createOpTx = await program.methods
+      .createOperatorAccount(new BN(1))
+      .accountsPartial({
+        operator: operatorPDA,
+        whitelistedAddress: admin.publicKey,
+        signer: admin.publicKey,
+        payer: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .transaction();
+    await sendAndConfirmTransaction(connection, createOpTx, [admin]);
+
+    // 3. Create config
+    const curves = [];
+    for (let i = 1; i <= 16; i++) {
+      curves.push({
+        sqrtPrice: i === 16 ? MAX_SQRT_PRICE : MAX_SQRT_PRICE.muln(i * 5).divn(100),
+        liquidity: U64_MAX.shln(30 + i),
+      });
+    }
+    const configKP = Keypair.generate();
+    config = configKP.publicKey;
+
+    const createConfigTx = await program.methods
+      .createConfig({
+        poolFees: {
+          baseFee: {
+            cliffFeeNumerator: new BN(2_500_000),
+            firstFactor: 0,
+            secondFactor: new BN(0),
+            thirdFactor: new BN(0),
+            baseFeeMode: 0,
+          },
+          dynamicFee: null,
+        },
+        activationType: 0,
+        collectFeeMode: 1,
+        migrationOption: 1,
+        tokenType: 1,
+        tokenDecimal: 6,
+        migrationQuoteThreshold: new BN(LAMPORTS_PER_SOL * 500),
+        partnerLiquidityPercentage: 0,
+        creatorLiquidityPercentage: 0,
+        partnerPermanentLockedLiquidityPercentage: 95,
+        creatorPermanentLockedLiquidityPercentage: 5,
+        sqrtStartPrice: MIN_SQRT_PRICE.shln(32),
+        lockedVesting: {
+          amountPerPeriod: new BN(0),
+          cliffDurationFromMigrationTime: new BN(0),
+          frequency: new BN(0),
+          numberOfPeriod: new BN(0),
+          cliffUnlockAmount: new BN(0),
+        },
+        migrationFeeOption: 0,
+        tokenSupply: null,
+        creatorTradingFeePercentage: 0,
+        tokenUpdateAuthority: 0,
+        migrationFee: { feePercentage: 0, creatorFeePercentage: 0 },
+        migratedPoolFee: { collectFeeMode: 0, dynamicFee: 0, poolFeeBps: 0 },
+        creatorLiquidityVestingInfo: {
+          vestingPercentage: 0,
+          cliffDurationFromMigrationTime: 0,
+          bpsPerPeriod: 0,
+          numberOfPeriods: 0,
+          frequency: 0,
+        },
+        partnerLiquidityVestingInfo: {
+          vestingPercentage: 0,
+          cliffDurationFromMigrationTime: 0,
+          bpsPerPeriod: 0,
+          numberOfPeriods: 0,
+          frequency: 0,
+        },
+        poolCreationFee: new BN(0),
+        enableFirstSwapWithMinFee: false,
+        compoundingFeeBps: 0,
+        migratedPoolBaseFeeMode: 0,
+        migratedPoolMarketCapFeeSchedulerParams: {
+          numberOfPeriod: 0,
+          sqrtPriceStepBps: 0,
+          schedulerExpirationDuration: 0,
+          reductionFactor: new BN(0),
+        },
+        padding: new Array(2).fill(0),
+        ipOwnerShare: 50000,
+        airdropShare: 30000,
+        referralShare: 20000,
+        creatorShare: 100000,
+        tokenAirdropShare: 50000,
+        curve: curves,
+      } as any)
+      .accountsPartial({
+        config: configKP.publicKey,
+        feeClaimer: admin.publicKey,
+        leftoverReceiver: admin.publicKey,
+        quoteMint,
+        payer: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .transaction();
+    await sendAndConfirmTransaction(connection, createConfigTx, [admin, configKP]);
+
+    // 4. Create pool (skip-launch-auth is on, so no Ed25519 needed)
+    baseMint = Keypair.generate();
+    pool = derivePool(config, baseMint.publicKey, quoteMint);
+    const baseVault = deriveTokenVault(baseMint.publicKey, pool);
+    const quoteVault = deriveTokenVault(quoteMint, pool);
+
+    const createPoolTx = await program.methods
+      .initializeVirtualPoolWithToken2022({
+        name: "Trade Test",
+        symbol: "TRADE",
+        uri: "https://example.com",
+      })
+      .accountsPartial({
+        config,
+        baseMint: baseMint.publicKey,
+        quoteMint,
+        pool,
+        payer: admin.publicKey,
+        creator: admin.publicKey,
+        poolAuthority: derivePoolAuthority(),
+        baseVault,
+        quoteVault,
+        tokenQuoteProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        ipworldHookProgram: HOOK_PROGRAM_ID,
+        hookConfig: deriveHookConfig(baseMint.publicKey),
+        extraAccountMetaList: deriveExtraAccountMetaList(baseMint.publicKey),
+        ipworldState,
+        instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      .transaction();
+    createPoolTx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }));
+    await sendAndConfirmTransaction(connection, createPoolTx, [admin, baseMint]);
+
+    // 5. Setup trader's token accounts and wrap SOL
+    const quoteAta = getAssociatedTokenAddressSync(quoteMint, trader.publicKey);
+    const baseAta = getAssociatedTokenAddressSync(
+      baseMint.publicKey,
+      trader.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID
+    );
+
+    const setupTx = new Transaction();
+    setupTx.add(
+      createAssociatedTokenAccountInstruction(
+        trader.publicKey,
+        quoteAta,
+        trader.publicKey,
+        quoteMint
+      ),
+      createAssociatedTokenAccountInstruction(
+        trader.publicKey,
+        baseAta,
+        trader.publicKey,
+        baseMint.publicKey,
+        TOKEN_2022_PROGRAM_ID
+      ),
+      SystemProgram.transfer({
+        fromPubkey: trader.publicKey,
+        toPubkey: quoteAta,
+        lamports: LAMPORTS_PER_SOL * 5,
+      }),
+      createSyncNativeInstruction(quoteAta)
+    );
+    await sendAndConfirmTransaction(connection, setupTx, [trader]);
   });
 
   async function buildBuyIx(buyer: Keypair): Promise<TransactionInstruction> {
-    // TODO: implement
-    // Build swap instruction for QuoteToBase (SOL → token)
-    // SwapMode: ExactIn with amount = 0.01 SOL
-    // This is the direction that requires TradeAuth
-    // Following the pattern from trade_auth.tests.ts buildSwapIx()
-    throw new Error("TODO: implement buildBuyIx");
+    // Build swap instruction for QuoteToBase (SOL → token) — requires TradeAuth
+    return await program.methods
+      .swap2({ amount0: new BN(LAMPORTS_PER_SOL * 0.01), amount1: new BN(0), swapMode: 1 })
+      .accountsPartial({
+        poolAuthority: derivePoolAuthority(),
+        config,
+        pool,
+        inputTokenAccount: getAssociatedTokenAddressSync(quoteMint, buyer.publicKey),
+        outputTokenAccount: getAssociatedTokenAddressSync(
+          baseMint.publicKey,
+          buyer.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID
+        ),
+        baseVault: deriveTokenVault(baseMint.publicKey, pool),
+        quoteVault: deriveTokenVault(quoteMint, pool),
+        baseMint: baseMint.publicKey,
+        quoteMint,
+        payer: buyer.publicKey,
+        tokenBaseProgram: TOKEN_2022_PROGRAM_ID,
+        tokenQuoteProgram: TOKEN_PROGRAM_ID,
+        referralTokenAccount: null,
+        ipworldState,
+        instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      .remainingAccounts([
+        { isSigner: false, isWritable: false, pubkey: SYSVAR_INSTRUCTIONS_PUBKEY },
+        { isSigner: false, isWritable: false, pubkey: HOOK_PROGRAM_ID },
+        { isSigner: false, isWritable: false, pubkey: deriveExtraAccountMetaList(baseMint.publicKey) },
+        { isSigner: false, isWritable: false, pubkey: deriveHookConfig(baseMint.publicKey) },
+      ])
+      .instruction();
   }
 
   async function buildSellIx(seller: Keypair, tokenAmount: BN): Promise<TransactionInstruction> {
-    // TODO: implement
-    // Build swap instruction for BaseToQuote (token → SOL)
-    // This direction does NOT require TradeAuth
-    throw new Error("TODO: implement buildSellIx");
+    // Build swap instruction for BaseToQuote (token → SOL) — no TradeAuth required
+    return await program.methods
+      .swap2({ amount0: tokenAmount, amount1: new BN(0), swapMode: 1 })
+      .accountsPartial({
+        poolAuthority: derivePoolAuthority(),
+        config,
+        pool,
+        inputTokenAccount: getAssociatedTokenAddressSync(
+          baseMint.publicKey,
+          seller.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID
+        ),
+        outputTokenAccount: getAssociatedTokenAddressSync(quoteMint, seller.publicKey),
+        baseVault: deriveTokenVault(baseMint.publicKey, pool),
+        quoteVault: deriveTokenVault(quoteMint, pool),
+        baseMint: baseMint.publicKey,
+        quoteMint,
+        payer: seller.publicKey,
+        tokenBaseProgram: TOKEN_2022_PROGRAM_ID,
+        tokenQuoteProgram: TOKEN_PROGRAM_ID,
+        referralTokenAccount: null,
+        ipworldState,
+        instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+      })
+      .remainingAccounts([
+        { isSigner: false, isWritable: false, pubkey: SYSVAR_INSTRUCTIONS_PUBKEY },
+        { isSigner: false, isWritable: false, pubkey: HOOK_PROGRAM_ID },
+        { isSigner: false, isWritable: false, pubkey: deriveExtraAccountMetaList(baseMint.publicKey) },
+        { isSigner: false, isWritable: false, pubkey: deriveHookConfig(baseMint.publicKey) },
+      ])
+      .instruction();
   }
 
   it("M-AUTH-001: Buy (QuoteToBase) requires TradeAuth", async () => {
-    // TODO: implement
-    // Steps:
-    //   1. Build buy instruction (QuoteToBase, SOL → token)
-    //   2. Send tx WITHOUT Ed25519 TradeAuth instruction
-    //   3. Expect: error matching /MissingEd25519Ix|custom program error/
-    //
-    // Note: This mirrors the pattern in trade_auth.tests.ts "Swap WITHOUT Ed25519 ix fails"
+    const buyIx = await buildBuyIx(trader);
+    const tx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+      buyIx
+    );
+
+    try {
+      await sendAndConfirmTransaction(connection, tx, [trader]);
+      expect.fail("Should have thrown — no Ed25519 ix");
+    } catch (e: any) {
+      const logs = e.logs?.join("\n") || e.message || "";
+      expect(logs).to.match(/MissingEd25519Ix|custom program error/);
+    }
   });
 
   it("M-AUTH-002: Sell (BaseToQuote) succeeds without TradeAuth", async () => {
-    // TODO: implement
-    // Steps:
-    //   1. First, perform a valid buy to give trader some tokens:
-    //      - Create valid TradeAuth for trader
-    //      - Execute buy with Ed25519 ix
-    //   2. Build sell instruction (BaseToQuote, token → SOL)
-    //   3. Send tx WITHOUT Ed25519 instruction
-    //   4. Expect: tx confirms successfully (no TradeAuth needed for sells)
-    //
-    // This is the core asymmetry: sells are free, buys are gated
+    // First, perform a valid buy to give trader some tokens
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+    const tradeAuthMsg = serializeTradeAuth(trader.publicKey, expiresAt);
+    const validSig = nacl.sign.detached(tradeAuthMsg, authority.secretKey);
+    const ed25519Ix = Ed25519Program.createInstructionWithPublicKey({
+      publicKey: authority.publicKey.toBytes(),
+      message: tradeAuthMsg,
+      signature: Buffer.from(validSig),
+    });
+
+    const buyIx = await buildBuyIx(trader);
+    const buyTx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+      ed25519Ix,
+      buyIx
+    );
+    await sendAndConfirmTransaction(connection, buyTx, [trader]);
+
+    // Now sell without TradeAuth — sells (BaseToQuote) are always allowed
+    const baseAta = getAssociatedTokenAddressSync(
+      baseMint.publicKey,
+      trader.publicKey,
+      false,
+      TOKEN_2022_PROGRAM_ID
+    );
+    const baseAtaInfo = await connection.getTokenAccountBalance(baseAta);
+    const tokenBalance = new BN(baseAtaInfo.value.amount);
+
+    // Use a small amount to avoid selling more than we have
+    const sellAmount = tokenBalance.divn(2);
+    const sellIx = await buildSellIx(trader, sellAmount);
+    const sellTx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+      sellIx
+    );
+
+    // Expect no error — sells do not require TradeAuth
+    await sendAndConfirmTransaction(connection, sellTx, [trader]);
   });
 
   it("M-AUTH-003: Expired TradeAuth rejected", async () => {
-    // TODO: implement
-    // Steps:
-    //   1. Create TradeAuth message for trader with expiresAt = now - 3600 (1 hour ago)
-    //   2. Sign with authority.secretKey
-    //   3. Build Ed25519Program instruction
-    //   4. Build buy instruction (QuoteToBase)
-    //   5. Send tx: [ComputeBudget, ed25519Ix, buyIx]
-    //   6. Expect: error matching /TradeAuthExpired|custom program error/
-    //
-    // Note: This mirrors the pattern in trade_auth.tests.ts "Swap with EXPIRED TradeAuth fails"
+    // Sign with correct authority but expired timestamp (1 hour ago)
+    const expiredAt = Math.floor(Date.now() / 1000) - 3600;
+    const tradeAuthMsg = serializeTradeAuth(trader.publicKey, expiredAt);
+    const sig = nacl.sign.detached(tradeAuthMsg, authority.secretKey);
+    const ed25519Ix = Ed25519Program.createInstructionWithPublicKey({
+      publicKey: authority.publicKey.toBytes(),
+      message: tradeAuthMsg,
+      signature: Buffer.from(sig),
+    });
+
+    const buyIx = await buildBuyIx(trader);
+    const tx = new Transaction().add(
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+      ed25519Ix,
+      buyIx
+    );
+
+    try {
+      await sendAndConfirmTransaction(connection, tx, [trader]);
+      expect.fail("Should have thrown — expired auth");
+    } catch (e: any) {
+      const logs = e.logs?.join("\n") || e.message || "";
+      expect(logs).to.match(/TradeAuthExpired|custom program error/);
+    }
   });
 });

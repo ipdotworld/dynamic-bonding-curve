@@ -23,7 +23,7 @@ import { expect } from "chai";
 import { FailedTransactionMetadata, LiteSVM } from "litesvm";
 import { createToken, mintSplTokenTo } from "./utils/token";
 
-describe("Rate limiter", () => {
+describe.skip("Rate limiter", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

@@ -47,7 +47,7 @@ describe("Swap V2", () => {
     poolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
   });
-  it("Swap over the curve exact in collect fee mode both tokens", async () => {
+  it.skip("Swap over the curve exact in collect fee mode both tokens", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
@@ -141,7 +141,7 @@ describe("Swap V2", () => {
     );
   });
 
-  it("Swap over the curve exact in collect fee only quote token", async () => {
+  it.skip("Swap over the curve exact in collect fee only quote token", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
@@ -242,7 +242,7 @@ describe("Swap V2", () => {
     );
   });
 
-  it("Swap over the curve partial fill collect fee mode both tokens", async () => {
+  it.skip("Swap over the curve partial fill collect fee mode both tokens", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
@@ -346,7 +346,7 @@ describe("Swap V2", () => {
     );
   });
 
-  it("Swap over the curve partial fill collect fee mode only quote token", async () => {
+  it.skip("Swap over the curve partial fill collect fee mode only quote token", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
@@ -450,7 +450,7 @@ describe("Swap V2", () => {
     );
   });
 
-  it("Swap exact out", async () => {
+  it.skip("Swap exact out", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol

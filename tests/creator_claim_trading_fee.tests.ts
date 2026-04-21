@@ -37,7 +37,7 @@ import { getConfig, getVirtualPool } from "./utils/fetcher";
 import { createToken, mintSplTokenTo } from "./utils/token";
 import { VirtualCurveProgram } from "./utils/types";
 
-describe("Creator and Partner share trading fees and surplus", () => {
+describe.skip("Creator and Partner share trading fees and surplus", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

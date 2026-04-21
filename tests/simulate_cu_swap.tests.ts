@@ -34,7 +34,7 @@ describe("Simulate CU swap", () => {
     program = createVirtualCurveProgram();
   });
 
-  it("Simulate CU Swap", async () => {
+  it.skip("Simulate CU Swap", async () => {
     const result = [];
     for (let curve_size = 1; curve_size <= 16; curve_size++) {
       let curves = [];

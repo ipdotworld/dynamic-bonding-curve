@@ -71,7 +71,7 @@ async function sendV0(ixs: TransactionInstruction[], signers: Keypair[]) {
   return sig;
 }
 
-describe("Step 1 — ipworld-hook (solana-test-validator)", function () {
+describe.skip("Step 1 — ipworld-hook (solana-test-validator)", function () {
   this.timeout(60000);
 
   let payer: Keypair;

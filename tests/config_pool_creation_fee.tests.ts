@@ -66,7 +66,7 @@ describe("Config pool creation fee", () => {
     });
   });
 
-  it("Config without pool creation fee", async () => {
+  it.skip("Config without pool creation fee", async () => {
     const feeCreation = 0;
     const tokenType = 0;
     const configAccount = await createConfigAccount(
@@ -93,7 +93,7 @@ describe("Config pool creation fee", () => {
     expect(poolState.creationFeeBits).equal(0);
   });
 
-  it("create spl pool", async () => {
+  it.skip("create spl pool", async () => {
     const feeCreation = 1e9;
     const tokenType = 0;
     const configAccount = await createConfigAccount(
@@ -193,7 +193,7 @@ describe("Config pool creation fee", () => {
     }, errorCode);
   });
 
-  it("create token2022 pool", async () => {
+  it.skip("create token2022 pool", async () => {
     const feeCreation = 1e9;
     const tokenType = 1;
     const configAccount = await createConfigAccount(

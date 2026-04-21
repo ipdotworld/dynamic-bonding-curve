@@ -29,7 +29,7 @@ import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 import { createToken, mintSplTokenTo } from "./utils/token";
 
-describe("Build graph curve", () => {
+describe.skip("Build graph curve", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

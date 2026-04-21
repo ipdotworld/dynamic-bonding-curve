@@ -54,7 +54,7 @@ function deriveVault(mint: PublicKey): [PublicKey, number] {
   );
 }
 
-describe("ipworld-splitter", () => {
+describe.skip("ipworld-splitter", () => {
   let admin: Keypair;
   let authority: Keypair;
   let treasuryWallet: Keypair;

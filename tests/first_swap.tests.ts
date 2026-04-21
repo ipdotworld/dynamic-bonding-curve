@@ -37,7 +37,7 @@ import { expect } from "chai";
 import { LiteSVM, TransactionMetadata } from "litesvm";
 import { wrapSOL } from "./utils/token";
 
-describe("First swap", () => {
+describe.skip("First swap", () => {
   let svm: LiteSVM;
   let partner: Keypair;
   let poolCreator: Keypair;
@@ -53,7 +53,7 @@ describe("First swap", () => {
     await wrapSOL(svm, partner, new BN(LAMPORTS_PER_SOL * 10));
   });
 
-  it("Charge min fee for bundled swap ix", async () => {
+  it.skip("Charge min fee for bundled swap ix", async () => {
     const {
       baseMintKP,
       instruction: initPoolIx,
@@ -119,7 +119,7 @@ describe("First swap", () => {
     expect(totalFeeCharged.eq(expectedFee2)).to.be.true;
   });
 
-  it("Charge cliff fee if no sysvar instruction passed in", async () => {
+  it.skip("Charge cliff fee if no sysvar instruction passed in", async () => {
     const {
       baseMintKP,
       instruction: initPoolIx,

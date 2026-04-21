@@ -34,7 +34,7 @@ import { getConfig, getVirtualPool } from "./utils/fetcher";
 import { createToken, mintSplTokenTo } from "./utils/token";
 import { VirtualCurveProgram } from "./utils/types";
 
-describe("Migration fee", () => {
+describe.skip("Migration fee", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

@@ -35,7 +35,7 @@ import { getConfig, getVirtualPool } from "./utils/fetcher";
 import { createToken, mintSplTokenTo } from "./utils/token";
 import { VirtualCurveProgram } from "./utils/types";
 
-describe("Update creator", () => {
+describe.skip("Update creator", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;

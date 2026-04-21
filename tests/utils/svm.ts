@@ -74,12 +74,12 @@ export function startSvm() {
     .update("account:IpworldState")
     .digest()
     .subarray(0, 8);
-  const dummyAuthority = Keypair.generate().publicKey;
+  _svmAuthority = Keypair.generate();
   const zeroKey = PublicKey.default;
   const ipworldData = Buffer.alloc(137);
   discriminator.copy(ipworldData, 0);
-  dummyAuthority.toBuffer().copy(ipworldData, 8);    // authority
-  dummyAuthority.toBuffer().copy(ipworldData, 40);   // admin
+  _svmAuthority.publicKey.toBuffer().copy(ipworldData, 8);    // authority
+  _svmAuthority.publicKey.toBuffer().copy(ipworldData, 40);   // admin
   zeroKey.toBuffer().copy(ipworldData, 72);          // pending_authority (zero = no pending)
   zeroKey.toBuffer().copy(ipworldData, 104);         // pending_admin (zero = no pending)
   ipworldData.writeUInt8(ipworldBump, 136);          // bump
@@ -91,6 +91,15 @@ export function startSvm() {
   });
 
   return svm;
+}
+
+/** Authority keypair used for Ed25519 LaunchAuth/TradeAuth signatures in LiteSVM tests. */
+let _svmAuthority: Keypair;
+
+/** Returns the authority keypair that signed the IpworldState in the current SVM instance. */
+export function getSvmAuthority(): Keypair {
+  if (!_svmAuthority) throw new Error("startSvm() must be called before getSvmAuthority()");
+  return _svmAuthority;
 }
 
 export function generateAndFund(svm: LiteSVM): Keypair {
