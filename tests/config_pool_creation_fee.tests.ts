@@ -66,7 +66,7 @@ describe("Config pool creation fee", () => {
     });
   });
 
-  it.skip("Config without pool creation fee", async () => {
+  it("Config without pool creation fee", async () => {
     const feeCreation = 0;
     const tokenType = 0;
     const configAccount = await createConfigAccount(
