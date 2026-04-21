@@ -14,6 +14,7 @@ use crate::{
         MAX_MIGRATION_FEE_PERCENTAGE, MAX_SQRT_PRICE, MIN_LOCKED_LIQUIDITY_BPS,
         MIN_MIGRATED_POOL_FEE_BPS, MIN_SQRT_PRICE,
     },
+    state::config::FEE_SHARE_PRECISION,
     damm_v2_utils::{
         validate_vesting_parameters, BaseFeeMode as DammV2BaseFeeMode, DammV2DynamicFee,
         DammV2PodAlignedFeeMarketCapScheduler,
@@ -70,6 +71,14 @@ pub struct ConfigParameters {
     /// padding for future use
     pub padding: [u8; 2],
     pub curve: Vec<LiquidityDistributionParameters>,
+    /// IPWorld fee shares (in FEE_SHARE_PRECISION = 1_000_000 units)
+    /// ip_owner_share + airdrop_share + referral_share + creator_share must be < 1_000_000
+    pub ip_owner_share: u32,
+    pub airdrop_share: u32,
+    pub referral_share: u32,
+    pub creator_share: u32,
+    /// token_airdrop_share must be < 1_000_000 (independent of quote fee shares)
+    pub token_airdrop_share: u32,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, InitSpace)]
@@ -398,6 +407,13 @@ impl ConfigParameters {
             CollectFeeMode::try_from(self.collect_fee_mode).is_ok(),
             PoolError::InvalidCollectFeeMode
         );
+        // IPWorld requires OutputToken mode for dual-stream fee distribution
+        let collect_fee_mode_enum = CollectFeeMode::try_from(self.collect_fee_mode)
+            .map_err(|_| PoolError::InvalidCollectFeeMode)?;
+        require!(
+            collect_fee_mode_enum == CollectFeeMode::OutputToken,
+            PoolError::InvalidCollectFeeMode
+        );
         // validate migration option and token type
         let migration_option_value = MigrationOption::try_from(self.migration_option)
             .map_err(|_| PoolError::InvalidMigrationOption)?;
@@ -406,7 +422,7 @@ impl ConfigParameters {
         let migration_fee_option = MigrationFeeOption::try_from(self.migration_fee_option)
             .map_err(|_| PoolError::InvalidMigrationFeeOption)?;
 
-        let token_type_value =
+        let _token_type_value =
             TokenType::try_from(self.token_type).map_err(|_| PoolError::InvalidTokenType)?;
 
         let migrated_pool_fee_validator = MigratedPoolFeeValidator::new(
@@ -417,30 +433,8 @@ impl ConfigParameters {
         );
 
         match migration_option_value {
-            MigrationOption::MeteoraDamm => {
-                require!(
-                    token_type_value == TokenType::SplToken,
-                    PoolError::InvalidTokenType
-                );
-                require!(
-                    *quote_mint.to_account_info().owner == anchor_spl::token::Token::id(),
-                    PoolError::InvalidQuoteMint
-                );
-
-                require!(
-                    migration_fee_option != MigrationFeeOption::Customizable
-                        && migrated_pool_fee_validator.is_none(),
-                    PoolError::InvalidMigrationFeeOption
-                );
-                // validate vesting
-                require!(
-                    self.partner_liquidity_vesting_info.is_zero(),
-                    PoolError::InvalidVestingParameters
-                );
-                require!(
-                    self.creator_liquidity_vesting_info.is_zero(),
-                    PoolError::InvalidVestingParameters
-                );
+            MigrationOption::MeteoraDammDisabled => {
+                return Err(PoolError::InvalidMigrationOption.into());
             }
             MigrationOption::DammV2 => {
                 if migration_fee_option == MigrationFeeOption::Customizable {
@@ -531,6 +525,26 @@ impl ConfigParameters {
             PoolError::InvalidCurve
         );
 
+        // Validate IPWorld fee shares
+        // Quote fee shares (SELL side): sum must be strictly less than FEE_SHARE_PRECISION (remainder goes to protocol treasury)
+        let total_quote_share = self
+            .ip_owner_share
+            .checked_add(self.airdrop_share)
+            .ok_or(PoolError::MathOverflow)?
+            .checked_add(self.referral_share)
+            .ok_or(PoolError::MathOverflow)?
+            .checked_add(self.creator_share)
+            .ok_or(PoolError::MathOverflow)?;
+        require!(
+            total_quote_share < FEE_SHARE_PRECISION,
+            PoolError::InvalidFeePercentage
+        );
+        // Base fee share (BUY side): must be strictly less than FEE_SHARE_PRECISION (remainder goes to ip_treasury)
+        require!(
+            self.token_airdrop_share < FEE_SHARE_PRECISION,
+            PoolError::InvalidFeePercentage
+        );
+
         Ok(())
     }
 }
@@ -596,6 +610,11 @@ pub fn handle_create_config(
         migrated_pool_market_cap_fee_scheduler_params,
         enable_first_swap_with_min_fee,
         compounding_fee_bps,
+        ip_owner_share,
+        airdrop_share,
+        referral_share,
+        creator_share,
+        token_airdrop_share,
         ..
     } = config_parameters.clone();
 
@@ -743,6 +762,11 @@ pub fn handle_create_config(
         migrated_pool_market_cap_fee_scheduler_params,
         &curve,
         enable_first_swap_with_min_fee.into(),
+        ip_owner_share,
+        airdrop_share,
+        referral_share,
+        creator_share,
+        token_airdrop_share,
     )?;
 
     // re-validate total locked liquidity

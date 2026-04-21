@@ -36,6 +36,10 @@ use damm_v2::types::VestingParameters as DammV2VestingParameters;
 
 use super::fee::{FeeOnAmountResult, VolatilityTracker};
 
+/// Precision denominator for IPWorld fee share fields (ip_owner_share, airdrop_share, etc.)
+/// A value of 1_000_000 means 100%. E.g. ip_owner_share = 200_000 means 20%.
+pub const FEE_SHARE_PRECISION: u32 = 1_000_000;
+
 /// base fee mode
 #[repr(u8)]
 #[derive(
@@ -125,10 +129,10 @@ impl PoolFeesConfig {
             .safe_add(base_fee_numerator.into())?;
 
         // Cap the total fee at MAX_FEE_NUMERATOR
-        let total_fee_numerator = if total_fee_numerator > MAX_FEE_NUMERATOR.into() {
+        let total_fee_numerator: u64 = if total_fee_numerator > MAX_FEE_NUMERATOR.into() {
             MAX_FEE_NUMERATOR
         } else {
-            total_fee_numerator.try_into().unwrap()
+            total_fee_numerator.try_into().map_err(|_| PoolError::TypeCastFailed)?
         };
 
         Ok(total_fee_numerator)
@@ -198,6 +202,10 @@ impl PoolFeesConfig {
         Ok((included_fee_amount, fee_amount))
     }
 
+    /// Deprecated: 2-stage partner/protocol fee split. Superseded by IPWorld flat fee
+    /// distribution in apply_swap_result. Kept to avoid breaking any existing test
+    /// references. Do not call from new production code.
+    #[deprecated(since = "A-04", note = "Use IPWorld flat fee distribution instead")]
     pub fn split_fees(&self, fee_amount: u64, has_referral: bool) -> Result<(u64, u64, u64)> {
         let protocol_fee =
             safe_mul_div_cast_u64(fee_amount, PROTOCOL_FEE_PERCENT.into(), 100, Rounding::Down)?;
@@ -413,7 +421,8 @@ impl TokenAuthorityOption {
     AnchorSerialize,
 )]
 pub enum MigrationOption {
-    MeteoraDamm,
+    #[deprecated(note = "DAMM v1 migration disabled — use DammV2")]
+    MeteoraDammDisabled,
     DammV2,
 }
 
@@ -498,10 +507,14 @@ pub struct PoolConfig {
     pub partner_liquidity_vesting_info: LiquidityVestingInfo,
     // Creator liquidity vesting info, only available for DAMM v2 migration
     pub creator_liquidity_vesting_info: LiquidityVestingInfo,
-    /// Padding for future use
-    pub padding_0: [u8; 14],
-    /// Previously was protocol and referral fee percent. Beware of tombstone.
-    pub padding_1: u16,
+    /// IPWorld fee share: IP owner's share of quote fee (SELL side), in FEE_SHARE_PRECISION units
+    pub ip_owner_share: u32,
+    /// IPWorld fee share: airdrop (UGC+Holder) share of quote fee (SELL side), in FEE_SHARE_PRECISION units
+    pub airdrop_share: u32,
+    /// IPWorld fee share: referral share of quote fee (SELL side), in FEE_SHARE_PRECISION units
+    pub referral_share: u32,
+    /// IPWorld fee share: creator share of quote fee (SELL side), in FEE_SHARE_PRECISION units
+    pub creator_share: u32,
     /// Collect fee mode
     pub collect_fee_mode: u8,
     /// migration option
@@ -536,7 +549,10 @@ pub struct PoolConfig {
     pub migration_fee_percentage: u8,
     /// creator migration fee percentage
     pub creator_migration_fee_percentage: u8,
-    pub padding_2: [u8; 7],
+    /// Explicit alignment padding so that token_airdrop_share (u32) is 4-byte aligned
+    pub fee_config_padding: [u8; 3],
+    /// IPWorld fee share: token airdrop share of base fee (BUY side), in FEE_SHARE_PRECISION units
+    pub token_airdrop_share: u32,
     /// swap base amount
     pub swap_base_amount: u64,
     /// migration quote threshold (in quote token)
@@ -733,6 +749,11 @@ impl PoolConfig {
         migrated_pool_market_cap_fee_scheduler: MigratedPoolMarketCapFeeSchedulerParams,
         curve: &[LiquidityDistributionParameters],
         enable_creator_first_swap_with_min_fee: u8,
+        ip_owner_share: u32,
+        airdrop_share: u32,
+        referral_share: u32,
+        creator_share: u32,
+        token_airdrop_share: u32,
     ) -> Result<()> {
         self.version = 0;
         self.quote_mint = *quote_mint;
@@ -788,6 +809,13 @@ impl PoolConfig {
             .map_err(|_| PoolError::UndeterminedError)?;
 
         self.enable_first_swap_with_min_fee = enable_creator_first_swap_with_min_fee;
+
+        // IPWorld flat fee distribution shares
+        self.ip_owner_share = ip_owner_share;
+        self.airdrop_share = airdrop_share;
+        self.referral_share = referral_share;
+        self.creator_share = creator_share;
+        self.token_airdrop_share = token_airdrop_share;
 
         for i in 0..curve.len() {
             self.curve[i] = curve[i].to_liquidity_distribution_config();
@@ -976,6 +1004,9 @@ impl PoolConfig {
         })
     }
 
+    /// Deprecated: partner/creator split no longer used by apply_swap_result post A-04.
+    /// Kept to avoid breaking test references.
+    #[deprecated(since = "A-04", note = "Partner system removed in A-04")]
     pub fn split_partner_and_creator_fee(&self, fee: u64) -> Result<PartnerAndCreatorSplitFee> {
         // early return
         if self.creator_trading_fee_percentage == 0 {

@@ -1,5 +1,6 @@
-pub mod meteora_damm;
-pub use meteora_damm::*;
+// DAMM v1 migration disabled — Token2022 is incompatible with DAMM v1 (SPL Token only)
+// pub mod meteora_damm;
+// pub use meteora_damm::*;
 pub mod dynamic_amm_v2;
 pub use dynamic_amm_v2::*;
 pub mod create_locker;

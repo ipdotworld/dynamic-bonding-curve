@@ -92,8 +92,9 @@ pub fn get_migration_handler(
     migrated_collect_fee_mode: MigratedCollectFeeMode,
     migration_sqrt_price: u128,
 ) -> Box<dyn MigrationHandler> {
-    // if damm v1
-    if migration_option == MigrationOption::MeteoraDamm {
+    // DAMM v1 migration disabled — MeteoraDammDisabled variant should never reach here
+    // (rejected at config creation time). Treat as compounding for safety.
+    if migration_option == MigrationOption::MeteoraDammDisabled {
         return Box::new(CompoundingLiquidity {
             migration_sqrt_price,
         });
