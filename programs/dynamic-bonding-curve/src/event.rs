@@ -100,7 +100,6 @@ pub struct EvtCreateConfigV2 {
     pub config: Pubkey,
     pub quote_mint: Pubkey,
     pub fee_claimer: Pubkey,
-    pub leftover_receiver: Pubkey,
     pub config_parameters: ConfigParameters,
 }
 
@@ -201,7 +200,7 @@ pub struct EvtCreatorWithdrawSurplus {
 #[event]
 pub struct EvtWithdrawLeftover {
     pub pool: Pubkey,
-    pub leftover_receiver: Pubkey,
+    pub ip_treasury: Pubkey,
     pub leftover_amount: u64,
 }
 

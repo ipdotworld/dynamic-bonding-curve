@@ -140,7 +140,6 @@ describe("Create pool with token2022", () => {
     };
     let params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
       instructionParams,

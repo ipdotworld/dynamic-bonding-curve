@@ -83,7 +83,6 @@ describe.skip("Rate limiter", () => {
     );
     let config = await createConfig(svm, program, {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -224,7 +223,6 @@ describe.skip("Rate limiter", () => {
     );
     let config = await createConfig(svm, program, {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,

@@ -114,7 +114,6 @@ describe("Simulate CU swap", () => {
       };
       const createConfigParams: CreateConfigParams<ConfigParameters> = {
         payer: user,
-        leftoverReceiver: user.publicKey,
         feeClaimer: user.publicKey,
         quoteMint: NATIVE_MINT,
         instructionParams,

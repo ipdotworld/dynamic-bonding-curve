@@ -155,7 +155,6 @@ describe.skip("Fixed token supply", () => {
     };
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
       instructionParams,

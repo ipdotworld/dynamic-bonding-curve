@@ -24,7 +24,6 @@ describe("Backwards compatibility - PoolConfig account", () => {
     const configSplTokenParams: createConfigSplTokenWithBaseFeeParametersParams =
       {
         payer: user,
-        leftoverReceiver: user.publicKey,
         feeClaimer: user.publicKey,
         quoteMint: NATIVE_MINT,
       };
@@ -38,8 +37,9 @@ describe("Backwards compatibility - PoolConfig account", () => {
     const data = Buffer.from(account.data);
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
-    // 8 bytes disc + 32 bytes quote_mint + 32 bytes fee_claimer + 32 bytes leftover_receiver
-    const baseFeeOffset = 8 + 32 + 32 + 32;
+    // 8 bytes disc + 32 bytes quote_mint + 32 bytes fee_claimer
+    // Note: leftover_receiver field removed (AC-A08). Offset adjusted.
+    const baseFeeOffset = 8 + 32 + 32;
 
     const cliffFeeNumerator = view.getBigUint64(baseFeeOffset, true);
     const periodFrequency = view.getBigUint64(baseFeeOffset + 8, true); // second factor | period_frequency

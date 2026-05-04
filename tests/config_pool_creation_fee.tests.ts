@@ -329,7 +329,6 @@ async function createConfigAccount(
 
   const configAccount = await createConfig(svm, program, {
     payer: creator,
-    leftoverReceiver: creator.publicKey,
     feeClaimer: creator.publicKey,
     quoteMint,
     instructionParams,

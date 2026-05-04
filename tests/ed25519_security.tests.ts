@@ -174,7 +174,6 @@ describe("T-01: Ed25519 Security", () => {
       .accountsPartial({
         config: configKP.publicKey,
         feeClaimer: admin.publicKey,
-        leftoverReceiver: admin.publicKey,
         quoteMint,
         payer: admin.publicKey,
         systemProgram: SystemProgram.programId,

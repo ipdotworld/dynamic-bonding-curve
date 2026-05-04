@@ -202,10 +202,11 @@ impl PoolFeesConfig {
         Ok((included_fee_amount, fee_amount))
     }
 
-    /// Deprecated: 2-stage partner/protocol fee split. Superseded by IPWorld flat fee
-    /// distribution in apply_swap_result. Kept to avoid breaking any existing test
-    /// references. Do not call from new production code.
-    #[deprecated(since = "A-04", note = "Use IPWorld flat fee distribution instead")]
+    /// 2-stage partner/protocol fee split used by swap path to decompose fee_amount
+    /// into (trading_fee, protocol_fee, referral_fee) components for SwapResult.
+    /// apply_swap_result recombines these components into total_fee for IPWorld flat
+    /// distribution. This decomposition is retained because the components appear in
+    /// on-chain events and the referral immediate-transfer path.
     pub fn split_fees(&self, fee_amount: u64, has_referral: bool) -> Result<(u64, u64, u64)> {
         let protocol_fee =
             safe_mul_div_cast_u64(fee_amount, PROTOCOL_FEE_PERCENT.into(), 100, Rounding::Down)?;
@@ -499,8 +500,6 @@ pub struct PoolConfig {
     pub quote_mint: Pubkey,
     /// Address to get the fee
     pub fee_claimer: Pubkey,
-    /// Address to receive extra base token after migration, in case token is fixed supply
-    pub leftover_receiver: Pubkey,
     /// Pool fee
     pub pool_fees: PoolFeesConfig,
     // Partner liquidity vesting info, only available for DAMM v2 migration
@@ -547,10 +546,9 @@ pub struct PoolConfig {
     pub token_update_authority: u8,
     /// migration fee percentage
     pub migration_fee_percentage: u8,
-    /// creator migration fee percentage
-    pub creator_migration_fee_percentage: u8,
-    /// Explicit alignment padding so that token_airdrop_share (u32) is 4-byte aligned
-    pub fee_config_padding: [u8; 3],
+    /// Explicit alignment padding so that token_airdrop_share (u32) is 4-byte aligned.
+    /// Increased from [u8;3] to [u8;4] after removing creator_migration_fee_percentage (u8).
+    pub fee_config_padding: [u8; 4],
     /// IPWorld fee share: token airdrop share of base fee (BUY side), in FEE_SHARE_PRECISION units
     pub token_airdrop_share: u32,
     /// swap base amount
@@ -589,7 +587,7 @@ pub struct PoolConfig {
     pub curve: [LiquidityDistributionConfig; MAX_CURVE_POINT_CONFIG],
 }
 
-const_assert_eq!(PoolConfig::INIT_SPACE, 1040);
+const_assert_eq!(PoolConfig::INIT_SPACE, 1008);
 
 #[zero_copy]
 #[derive(Debug, Default, InitSpace)]
@@ -713,7 +711,6 @@ impl PoolConfig {
         &mut self,
         quote_mint: &Pubkey,
         fee_claimer: &Pubkey,
-        leftover_receiver: &Pubkey,
         pool_fees: &PoolFeeParameters,
         creator_trading_fee_percentage: u8,
         token_update_authority: u8,
@@ -758,12 +755,10 @@ impl PoolConfig {
         self.version = 0;
         self.quote_mint = *quote_mint;
         self.fee_claimer = *fee_claimer;
-        self.leftover_receiver = *leftover_receiver;
         self.pool_fees = pool_fees.to_pool_fees_config();
         self.creator_trading_fee_percentage = creator_trading_fee_percentage;
         self.token_update_authority = token_update_authority;
         self.migration_fee_percentage = migration_fee.fee_percentage;
-        self.creator_migration_fee_percentage = migration_fee.creator_fee_percentage;
         self.collect_fee_mode = collect_fee_mode;
         self.migration_option = migration_option;
         self.activation_type = activation_type;
@@ -853,13 +848,10 @@ impl PoolConfig {
     pub fn get_migration_fee_distribution(&self) -> Result<MigrationFeeDistribution> {
         let MigrationAmount { fee, .. } = self.get_migration_quote_amount_for_config()?;
 
-        let creator_migration_fee = safe_mul_div_cast_u64(
-            fee,
-            self.creator_migration_fee_percentage.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let partner_migration_fee = fee.safe_sub(creator_migration_fee)?;
+        // AC-A07: 100% of migration fee goes to treasury (operator).
+        // Creator split removed.
+        let creator_migration_fee: u64 = 0;
+        let partner_migration_fee = fee;
         Ok(MigrationFeeDistribution {
             partner_migration_fee,
             creator_migration_fee,
@@ -1004,9 +996,8 @@ impl PoolConfig {
         })
     }
 
-    /// Deprecated: partner/creator split no longer used by apply_swap_result post A-04.
-    /// Kept to avoid breaking test references.
-    #[deprecated(since = "A-04", note = "Partner system removed in A-04")]
+    /// Splits surplus between partner and creator based on creator_trading_fee_percentage.
+    /// Used by get_partner_surplus / get_creator_surplus for surplus withdrawal paths.
     pub fn split_partner_and_creator_fee(&self, fee: u64) -> Result<PartnerAndCreatorSplitFee> {
         // early return
         if self.creator_trading_fee_percentage == 0 {

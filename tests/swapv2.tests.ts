@@ -81,7 +81,6 @@ describe("Swap V2", () => {
 
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -175,7 +174,6 @@ describe("Swap V2", () => {
 
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -276,7 +274,6 @@ describe("Swap V2", () => {
 
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -380,7 +377,6 @@ describe("Swap V2", () => {
 
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -496,7 +492,6 @@ describe("Swap V2", () => {
 
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,

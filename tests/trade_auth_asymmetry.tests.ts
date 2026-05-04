@@ -172,7 +172,6 @@ describe("T-05: TradeAuth Buy/Sell Asymmetry", () => {
       .accountsPartial({
         config: configKP.publicKey,
         feeClaimer: admin.publicKey,
-        leftoverReceiver: admin.publicKey,
         quoteMint,
         payer: admin.publicKey,
         systemProgram: SystemProgram.programId,

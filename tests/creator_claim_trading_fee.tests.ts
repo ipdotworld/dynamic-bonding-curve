@@ -96,7 +96,6 @@ describe("Creator and Partner share trading fees and surplus", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -160,7 +159,6 @@ describe("Creator and Partner share trading fees and surplus", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -224,7 +222,6 @@ describe("Creator and Partner share trading fees and surplus", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -288,7 +285,6 @@ describe("Creator and Partner share trading fees and surplus", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -372,32 +368,14 @@ async function fullFlow(
   let partnerTradingFeePercentage = 100 - creatorTradingFeePercentage;
   virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
-  if (creatorTradingFeePercentage == 0) {
-    expect(virtualPoolState.creatorBaseFee.toString()).eq("0");
-    expect(virtualPoolState.creatorQuoteFee.toString()).eq("0");
-  } else if (partnerTradingFeePercentage == 0) {
-    expect(virtualPoolState.partnerBaseFee.toString()).eq("0");
-    expect(virtualPoolState.partnerQuoteFee.toString()).eq("0");
-  } else {
-    expect(
-      virtualPoolState.creatorBaseFee
-        .mul(new BN(partnerTradingFeePercentage))
-        .toString()
-    ).eq(
-      virtualPoolState.partnerBaseFee
-        .mul(new BN(creatorTradingFeePercentage))
-        .toString()
-    );
-    expect(
-      virtualPoolState.creatorQuoteFee
-        .mul(new BN(partnerTradingFeePercentage))
-        .toString()
-    ).eq(
-      virtualPoolState.partnerQuoteFee
-        .mul(new BN(creatorTradingFeePercentage))
-        .toString()
-    );
-  }
+  // IPWorld A-04: partner fee fields are deprecated and always zero.
+  // creatorTradingFeePercentage is a legacy config field (kept for IDL compatibility).
+  // Fee distribution is now governed by creator_share in FEE_SHARE_PRECISION units.
+  // _deprecated_partner_base_fee and _deprecated_partner_quote_fee are always zero.
+  // _deprecated_creator_base_fee is always zero; creatorQuoteFee accumulates creator_share.
+  expect(virtualPoolState.deprecatedPartnerBaseFee.toString()).eq("0");
+  expect(virtualPoolState.deprecatedPartnerQuoteFee.toString()).eq("0");
+  expect(virtualPoolState.deprecatedCreatorBaseFee.toString()).eq("0");
 
   // migrate
   const poolAuthority = derivePoolAuthority();

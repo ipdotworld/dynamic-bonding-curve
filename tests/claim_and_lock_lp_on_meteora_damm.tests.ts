@@ -128,7 +128,6 @@ async function createPartnerConfig(
   };
   const params: CreateConfigParams<ConfigParameters> = {
     payer,
-    leftoverReceiver: owner,
     feeClaimer,
     quoteMint: NATIVE_MINT,
     instructionParams,

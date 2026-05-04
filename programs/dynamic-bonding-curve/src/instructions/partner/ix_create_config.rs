@@ -562,8 +562,6 @@ pub struct CreateConfigCtx<'info> {
 
     /// CHECK: fee_claimer
     pub fee_claimer: UncheckedAccount<'info>,
-    /// CHECK: owner extra base token in case token is fixed supply
-    pub leftover_receiver: UncheckedAccount<'info>,
     /// quote mint
     pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -702,10 +700,6 @@ pub fn handle_create_config(
             )?;
 
             require!(
-                ctx.accounts.leftover_receiver.key() != Pubkey::default(),
-                PoolError::InvalidLeftoverAddress
-            );
-            require!(
                 minimum_base_supply_without_buffer <= post_migration_token_supply
                     && post_migration_token_supply <= pre_migration_token_supply
                     && minimum_base_supply_with_buffer <= pre_migration_token_supply,
@@ -726,7 +720,6 @@ pub fn handle_create_config(
     config.init(
         &ctx.accounts.quote_mint.key(),
         ctx.accounts.fee_claimer.key,
-        ctx.accounts.leftover_receiver.key,
         &pool_fees,
         creator_trading_fee_percentage,
         token_update_authority,
@@ -780,7 +773,7 @@ pub fn handle_create_config(
         config: ctx.accounts.config.key(),
         fee_claimer: ctx.accounts.fee_claimer.key(),
         quote_mint: ctx.accounts.quote_mint.key(),
-        owner: ctx.accounts.leftover_receiver.key(),
+        owner: Pubkey::default(),
         pool_fees,
         collect_fee_mode,
         migration_option,
@@ -807,7 +800,6 @@ pub fn handle_create_config(
         config: ctx.accounts.config.key(),
         fee_claimer: ctx.accounts.fee_claimer.key(),
         quote_mint: ctx.accounts.quote_mint.key(),
-        leftover_receiver: ctx.accounts.leftover_receiver.key(),
         config_parameters: config_parameters
     });
 

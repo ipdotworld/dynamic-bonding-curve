@@ -95,7 +95,6 @@ describe("Migration fee", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,

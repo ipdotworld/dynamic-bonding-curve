@@ -235,3 +235,10 @@ export function deriveExtraAccountMetaListAddress(mint: PublicKey): PublicKey {
     IPWORLD_HOOK_PROGRAM_ID
   )[0];
 }
+
+export function deriveTokenVerificationAddress(pool: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("token_verification"), pool.toBuffer()],
+    DYNAMIC_BONDING_CURVE_PROGRAM_ID
+  )[0];
+}

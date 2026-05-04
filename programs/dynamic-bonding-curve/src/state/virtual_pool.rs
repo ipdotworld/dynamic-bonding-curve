@@ -110,10 +110,12 @@ pub struct VirtualPool {
     pub protocol_base_fee: u64,
     /// protocol quote fee
     pub protocol_quote_fee: u64,
-    /// partner base fee
-    pub partner_base_fee: u64,
-    /// trading quote fee
-    pub partner_quote_fee: u64,
+    /// Deprecated: partner base fee no longer accumulated post A-04 (IPWorld fee model).
+    /// Kept as zero-pad to preserve zero_copy layout of existing on-chain accounts.
+    pub _deprecated_partner_base_fee: u64,
+    /// Deprecated: partner quote fee no longer accumulated post A-04 (IPWorld fee model).
+    /// Kept as zero-pad to preserve zero_copy layout of existing on-chain accounts.
+    pub _deprecated_partner_quote_fee: u64,
     /// current price
     pub sqrt_price: u128,
     /// Activation point
@@ -140,9 +142,10 @@ pub struct VirtualPool {
     pub metrics: PoolMetrics,
     /// The time curve is finished
     pub finish_curve_timestamp: u64,
-    /// creator base fee
-    pub creator_base_fee: u64,
-    /// creator quote fee
+    /// Deprecated: creator base fee no longer accumulated post A-04 (IPWorld fee model).
+    /// Kept as zero-pad to preserve zero_copy layout of existing on-chain accounts.
+    pub _deprecated_creator_base_fee: u64,
+    /// creator quote fee (still accumulated via apply_swap_result creator_share)
     pub creator_quote_fee: u64,
     /// legacy creation fee bits, we dont use this now
     pub legacy_creation_fee_bits: u8,
@@ -1105,35 +1108,47 @@ impl VirtualPool {
         Ok(amount)
     }
 
+    /// Partner trading fee claim. Post A-04 IPWorld fee model, partner fees are no
+    /// longer accumulated; _deprecated_partner_base_fee / _deprecated_partner_quote_fee
+    /// are always zero for new pools. Legacy pools with residual balance can still drain.
     pub fn claim_partner_trading_fee(
         &mut self,
         max_base_amount: u64,
         max_quote_amount: u64,
     ) -> Result<(u64, u64)> {
-        let token_base_amount = self.partner_base_fee.min(max_base_amount);
-        let token_quote_amount = self.partner_quote_fee.min(max_quote_amount);
-        self.partner_base_fee = self.partner_base_fee.safe_sub(token_base_amount)?;
-        self.partner_quote_fee = self.partner_quote_fee.safe_sub(token_quote_amount)?;
+        let token_base_amount = self._deprecated_partner_base_fee.min(max_base_amount);
+        let token_quote_amount = self._deprecated_partner_quote_fee.min(max_quote_amount);
+        self._deprecated_partner_base_fee =
+            self._deprecated_partner_base_fee.safe_sub(token_base_amount)?;
+        self._deprecated_partner_quote_fee =
+            self._deprecated_partner_quote_fee.safe_sub(token_quote_amount)?;
         Ok((token_base_amount, token_quote_amount))
     }
 
+    /// Creator trading fee claim. Post A-04 IPWorld fee model, creator_base_fee is no
+    /// longer accumulated; _deprecated_creator_base_fee is always zero for new pools.
+    /// creator_quote_fee is still accumulated via apply_swap_result creator_share.
     pub fn claim_creator_trading_fee(
         &mut self,
         max_base_amount: u64,
         max_quote_amount: u64,
     ) -> Result<(u64, u64)> {
-        let token_base_amount = self.creator_base_fee.min(max_base_amount);
+        let token_base_amount = self._deprecated_creator_base_fee.min(max_base_amount);
         let token_quote_amount = self.creator_quote_fee.min(max_quote_amount);
-        self.creator_base_fee = self.creator_base_fee.safe_sub(token_base_amount)?;
+        self._deprecated_creator_base_fee =
+            self._deprecated_creator_base_fee.safe_sub(token_base_amount)?;
         self.creator_quote_fee = self.creator_quote_fee.safe_sub(token_quote_amount)?;
         Ok((token_base_amount, token_quote_amount))
     }
 
+    /// Returns total base fees that must remain in the vault and cannot be migrated.
+    /// Post A-04: only protocol_base_fee is accumulated; deprecated partner/creator
+    /// base fee fields are always zero for new pools but drain-safe for legacy pools.
     pub fn get_protocol_and_trading_base_fee(&self) -> Result<u64> {
         Ok(self
-            .partner_base_fee
-            .safe_add(self.protocol_base_fee)?
-            .safe_add(self.creator_base_fee)?)
+            .protocol_base_fee
+            .safe_add(self._deprecated_partner_base_fee)?
+            .safe_add(self._deprecated_creator_base_fee)?)
     }
 
     pub fn is_curve_complete(&self, migration_threshold: u64) -> bool {

@@ -44,7 +44,6 @@ describe("Backwards compatibility - misc", () => {
   it("createConfigSplToken", async () => {
     const configSplTokenParams: CreateConfigParams = {
       payer: user,
-      leftoverReceiver: user.publicKey,
       feeClaimer: user.publicKey,
       quoteMint: NATIVE_MINT,
       token2022: false,
@@ -69,7 +68,6 @@ describe("Backwards compatibility - misc", () => {
   it("createConfigToken2022", async () => {
     const configToken2022Params: CreateConfigParams = {
       payer: user,
-      leftoverReceiver: user.publicKey,
       feeClaimer: user.publicKey,
       quoteMint: NATIVE_MINT,
       token2022: true,

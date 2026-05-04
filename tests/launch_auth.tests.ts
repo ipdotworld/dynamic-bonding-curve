@@ -171,7 +171,6 @@ describe("Step 5 — Launch Auth enforcement", () => {
       .accountsPartial({
         config: configKP.publicKey,
         feeClaimer: admin.publicKey,
-        leftoverReceiver: admin.publicKey,
         quoteMint,
         payer: admin.publicKey,
         systemProgram: SystemProgram.programId,

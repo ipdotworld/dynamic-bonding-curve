@@ -325,6 +325,8 @@ impl<'info> MigrateDammV2Ctx<'info> {
         Ok(())
     }
 
+    /// Retained for potential future use; not called after A-03 single-position migration.
+    #[allow(dead_code)]
     fn set_authority_for_position(
         &self,
         position_nft_account: &AccountInfo<'info>,
@@ -347,6 +349,8 @@ impl<'info> MigrateDammV2Ctx<'info> {
         Ok(())
     }
 
+    /// Retained for potential future use; not called after A-03 single-position migration.
+    #[allow(dead_code)]
     fn create_second_position(&self, total_liquidity: u128) -> Result<()> {
         let pool_authority_seeds = pool_authority_seeds!(BUMP);
         msg!("create position");
@@ -692,10 +696,13 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
     let deposited_quote_amount =
         initial_quote_vault_amount.safe_sub(ctx.accounts.quote_vault.amount)?;
 
-    let leftover_migration_base_amount =
+    // A-03: leftover amounts computed for accounting only; they remain in vaults for
+    // protocol claim. Prefixed with _ to suppress unused-variable lint since they are
+    // referenced in comments and may be needed for future assertion logic.
+    let _leftover_migration_base_amount =
         excluded_protocol_fee_migration_base_amount.safe_sub(deposited_base_amount)?;
 
-    let leftover_migration_quote_amount =
+    let _leftover_migration_quote_amount =
         excluded_protocol_fee_migration_quote_amount.safe_sub(deposited_quote_amount)?;
 
     // A-03: Second position creation removed. All liquidity is in a single permanently-locked

@@ -103,7 +103,6 @@ describe("Swap Over the Curve", () => {
 
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -237,7 +236,6 @@ describe("Swap Over the Curve", () => {
 
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,

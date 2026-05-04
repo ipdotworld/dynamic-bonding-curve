@@ -102,6 +102,8 @@ pub enum PoolError {
     #[msg("Invalid vesting parameters")]
     InvalidVestingParameters,
 
+    // Deprecated (AC-A08): leftover_receiver removed from PoolConfig.
+    // Kept for IDL compatibility (error code number must not shift).
     #[msg("Invalid leftover address")]
     InvalidLeftoverAddress,
 
@@ -245,6 +247,9 @@ pub enum PoolError {
 
     #[msg("No pending referral change proposal")]
     NoPendingReferral,
+
+    #[msg("IP treasury address is not set — call set_ip_treasury first")]
+    IpTreasuryNotSet,
 }
 
 impl From<ProtozolZapError> for PoolError {

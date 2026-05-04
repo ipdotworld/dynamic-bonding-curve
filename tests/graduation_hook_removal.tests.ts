@@ -182,7 +182,6 @@ describe("Step 6 — Graduation: hook removal + DAMM v2 migration", () => {
 
     config = await createConfig(svm, program, {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
       instructionParams,
