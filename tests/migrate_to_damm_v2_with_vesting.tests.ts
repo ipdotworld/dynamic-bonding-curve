@@ -36,6 +36,7 @@ import { CpAmm } from "./utils/idl/damm_v2";
 type DammV2Pool = IdlAccounts<CpAmm>["pool"];
 type DammV2Position = IdlAccounts<CpAmm>["position"];
 
+// audit: F-032 — DAMM v2 vesting requires DAMM v2 program
 describe.skip("Migrate to damm v2 with vesting", () => {
   let svm: LiteSVM;
   let admin: Keypair;

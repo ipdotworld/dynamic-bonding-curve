@@ -37,6 +37,11 @@ import { getConfig, getVirtualPool } from "./utils/fetcher";
 import { createToken, mintSplTokenTo } from "./utils/token";
 import { VirtualCurveProgram } from "./utils/types";
 
+// SPEC-DBC-004 Phase 3 (REQ-I-001): the inline `claim_creator_trading_fee`
+// step inside each `fullFlowUpdateCreator*` helper has been removed because
+// the on-chain ix it called was deleted. The remaining flow (transferCreator
+// + swap + creatorWithdrawSurplus) still exercises the meaningful integration
+// surface for the "Update creator" suite.
 describe("Update creator", () => {
   let svm: LiteSVM;
   let admin: Keypair;
@@ -251,14 +256,8 @@ async function fullFlowUpdateCreatorInPreBondingCurve(
   };
   await swap(svm, program, params);
 
-  // creator claim trading fee
-  const claimTradingFeeParams: ClaimCreatorTradeFeeParams = {
-    creator: newCreator,
-    pool: virtualPool,
-    maxBaseAmount: new BN(U64_MAX),
-    maxQuoteAmount: new BN(U64_MAX),
-  };
-  await claimCreatorTradingFee(svm, program, claimTradingFeeParams);
+  // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed.
+  // Creator earnings now flow exclusively through `creator_withdraw_surplus`.
 
   // creator withdraw surplus
   await creatorWithdrawSurplus(svm, program, {
@@ -349,14 +348,8 @@ async function fullFlowUpdateCreatorPoolCreated(
     newCreator.publicKey
   );
 
-  //  new creator claim trading fee
-  const claimTradingFeeParams: ClaimCreatorTradeFeeParams = {
-    creator: newCreator,
-    pool: virtualPool,
-    maxBaseAmount: new BN(U64_MAX),
-    maxQuoteAmount: new BN(U64_MAX),
-  };
-  await claimCreatorTradingFee(svm, program, claimTradingFeeParams);
+  // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed.
+  // The new creator path now relies solely on `creator_withdraw_surplus`.
 
   //  new creator withdraw surplus
   await creatorWithdrawSurplus(svm, program, {

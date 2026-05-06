@@ -47,6 +47,7 @@ describe("Swap V2", () => {
     poolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
   });
+  // audit: F-041 — swapv2 matrix superseded by Phase 2 tests
   it.skip("Swap over the curve exact in collect fee mode both tokens", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
@@ -140,6 +141,7 @@ describe("Swap V2", () => {
     );
   });
 
+  // audit: F-037 — swapv2 matrix superseded by Phase 2 tests
   it.skip("Swap over the curve exact in collect fee only quote token", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
@@ -240,6 +242,7 @@ describe("Swap V2", () => {
     );
   });
 
+  // audit: F-038 — Partial-fill matrix superseded by REQ-S-005
   it.skip("Swap over the curve partial fill collect fee mode both tokens", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
@@ -343,6 +346,7 @@ describe("Swap V2", () => {
     );
   });
 
+  // audit: F-039 — Partial-fill matrix superseded by REQ-S-005
   it.skip("Swap over the curve partial fill collect fee mode only quote token", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
@@ -446,6 +450,7 @@ describe("Swap V2", () => {
     );
   });
 
+  // audit: F-040 — swapv2 matrix superseded by Phase 2 tests
   it.skip("Swap exact out", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;

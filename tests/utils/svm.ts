@@ -9,6 +9,7 @@ import {
   DAMM_V2_PROGRAM_ID,
   DYNAMIC_BONDING_CURVE_PROGRAM_ID,
   FLASH_RENT_FUND,
+  IP_OWNER_VAULT_PROGRAM_ID,
   IPWORLD_HOOK_PROGRAM_ID,
   JUPITER_V6_PROGRAM_ID,
   LOCKER_PROGRAM_ID,
@@ -43,6 +44,12 @@ export function startSvm() {
     "./target/deploy/ipworld_hook.so"
   );
   svm.addProgramFromFile(IPWORLD_HOOK_PROGRAM_ID, sourceFileHookPath);
+
+  // SPEC-DBC-004 Phase 6 (REQ-I-003): IP owner vesting vault program.
+  const sourceFileVaultPath = path.resolve(
+    "./target/deploy/ip_owner_vault.so"
+  );
+  svm.addProgramFromFile(IP_OWNER_VAULT_PROGRAM_ID, sourceFileVaultPath);
 
   // set wrap sol mint account
   svm.setAccount(NATIVE_MINT, {

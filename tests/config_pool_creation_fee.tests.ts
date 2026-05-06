@@ -93,6 +93,7 @@ describe("Config pool creation fee", () => {
     expect(poolState.creationFeeBits).equal(0);
   });
 
+  // audit: F-011 — Pool-creation fee path deferred (Phase 2 D-2)
   it.skip("create spl pool", async () => {
     const feeCreation = 1e9;
     const tokenType = 0;
@@ -193,6 +194,7 @@ describe("Config pool creation fee", () => {
     }, errorCode);
   });
 
+  // audit: F-010 — Pool-creation fee path deferred (Phase 2 D-2)
   it.skip("create token2022 pool", async () => {
     const feeCreation = 1e9;
     const tokenType = 1;

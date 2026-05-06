@@ -47,11 +47,11 @@ pub fn handle_transfer_pool_creator<'c: 'info, 'info>(
         _ => return Err(PoolError::NotPermitToDoThisAction.into()),
     }
 
-    // Require all accumulated creator fees to be claimed before transferring role
-    require!(
-        pool.creator_quote_fee == 0,
-        PoolError::UnclaimedFees
-    );
+    // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_quote_fee` field removed —
+    // creator-side trading fee accumulation eliminated alongside
+    // `creator_share`. Pre-transfer balance check no longer needed; any
+    // unclaimed creator surplus is handled by the existing
+    // `creator_withdraw_surplus` flow before transfer.
 
     pool.creator = ctx.accounts.new_creator.key();
 

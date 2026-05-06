@@ -23,6 +23,7 @@ import { expect } from "chai";
 import { FailedTransactionMetadata, LiteSVM } from "litesvm";
 import { createToken, mintSplTokenTo } from "./utils/token";
 
+// audit: F-033 — RateLimiter TS test env incomplete
 describe.skip("Rate limiter", () => {
   let svm: LiteSVM;
   let admin: Keypair;

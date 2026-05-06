@@ -214,6 +214,7 @@ describe("Create pool with token2022", () => {
     );
   });
 
+  // audit: F-043 — Metaplex token-metadata program not loaded into LiteSVM; metadata authority assertion not reachable
   it.skip("Create spl token pool from mutable config", async () => {
     virtualPool = await createPoolWithSplToken(svm, program, {
       poolCreator,
@@ -245,6 +246,7 @@ describe("Create pool with token2022", () => {
     expect(metadata.updateAuthority).eq(poolCreator.publicKey.toString());
   });
 
+  // audit: F-044 — Metaplex token-metadata program not loaded into LiteSVM; metadata authority assertion not reachable
   it.skip("Create spl pool from immutable config", async () => {
     virtualPool = await createPoolWithSplToken(svm, program, {
       poolCreator,

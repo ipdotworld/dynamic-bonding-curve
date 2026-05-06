@@ -72,11 +72,12 @@ pub struct ConfigParameters {
     pub padding: [u8; 2],
     pub curve: Vec<LiquidityDistributionParameters>,
     /// IPWorld fee shares (in FEE_SHARE_PRECISION = 1_000_000 units)
-    /// ip_owner_share + airdrop_share + referral_share + creator_share must be < 1_000_000
+    /// ip_owner_share + airdrop_share + referral_share must be < 1_000_000
+    /// (SPEC-DBC-004 Phase 3 — REQ-I-001: `creator_share` removed from the
+    /// IPWorld 4-way SELL fee model)
     pub ip_owner_share: u32,
     pub airdrop_share: u32,
     pub referral_share: u32,
-    pub creator_share: u32,
     /// token_airdrop_share must be < 1_000_000 (independent of quote fee shares)
     pub token_airdrop_share: u32,
 }
@@ -159,6 +160,22 @@ impl MigratedPoolFeeValidator {
             self.pool_fee_bps >= MIN_MIGRATED_POOL_FEE_BPS
                 && self.pool_fee_bps <= MAX_MIGRATED_POOL_FEE_BPS,
             PoolError::InvalidMigratedPoolFee
+        );
+
+        // SPEC-DBC-004 REQ-I-002: IPWorld enforces DAMM v2 OnlyB and zero compounding
+        // on the migrated pool. The DBC `MigratedCollectFeeMode::QuoteToken` (value 0)
+        // is what maps to DAMM v2 OnlyB (value 1) per migration_handler::to_dammv2.
+        // The SPEC text references "1 (OnlyB)" using DAMM v2's numeric value; the DBC
+        // field stores the DBC enum value, so QuoteToken (==0) is the OnlyB-equivalent.
+        let migrated_collect_fee_mode = self.collect_fee_mode;
+        let migrated_compounding_fee_bps = self.compounding_fee_bps;
+        require!(
+            migrated_collect_fee_mode == MigratedCollectFeeMode::QuoteToken as u8,
+            PoolError::InvalidMigratedFeeConfig
+        );
+        require!(
+            migrated_compounding_fee_bps == 0,
+            PoolError::InvalidMigratedFeeConfig
         );
 
         // validate collect fee mode
@@ -527,13 +544,12 @@ impl ConfigParameters {
 
         // Validate IPWorld fee shares
         // Quote fee shares (SELL side): sum must be strictly less than FEE_SHARE_PRECISION (remainder goes to protocol treasury)
+        // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed from the sum.
         let total_quote_share = self
             .ip_owner_share
             .checked_add(self.airdrop_share)
             .ok_or(PoolError::MathOverflow)?
             .checked_add(self.referral_share)
-            .ok_or(PoolError::MathOverflow)?
-            .checked_add(self.creator_share)
             .ok_or(PoolError::MathOverflow)?;
         require!(
             total_quote_share < FEE_SHARE_PRECISION,
@@ -611,7 +627,6 @@ pub fn handle_create_config(
         ip_owner_share,
         airdrop_share,
         referral_share,
-        creator_share,
         token_airdrop_share,
         ..
     } = config_parameters.clone();
@@ -758,7 +773,6 @@ pub fn handle_create_config(
         ip_owner_share,
         airdrop_share,
         referral_share,
-        creator_share,
         token_airdrop_share,
     )?;
 

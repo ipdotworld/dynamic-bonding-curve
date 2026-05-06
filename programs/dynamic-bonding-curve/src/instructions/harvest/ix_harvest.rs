@@ -5,11 +5,10 @@ use crate::{
     const_pda,
     safe_math::SafeMath,
     state::{
-        config::{FEE_SHARE_PRECISION, PoolConfig},
+        config::PoolConfig,
+        fee::{distribute_base_fee, distribute_quote_fee},
         MigrationProgress, VirtualPool,
     },
-    u128x128_math::Rounding,
-    utils_math::safe_mul_div_cast_u64,
     PoolError,
 };
 
@@ -191,54 +190,36 @@ pub fn handle_harvest<'c: 'info, 'info>(
     }
 
     let config = ctx.accounts.config.load()?;
-    let precision = FEE_SHARE_PRECISION as u64;
 
     let mut pool = ctx.accounts.pool.load_mut()?;
 
     // --- 5. Distribute collected SOL (quote) fees ---
-    // Same logic as apply_swap_result quote_fee distribution in virtual_pool.rs.
-    // No referral in harvest (no referral account), so referral share goes to treasury.
+    // SPEC-DBC-004 Phase 2 (REQ-S-005): same recipient ratios as
+    // `apply_swap_result` quote distribution. Implementation centralized in
+    // `state::fee::distribute_quote_fee`.
+    // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed; distribution
+    // is now 3-way at the helper level (ip_owner + airdrop + treasury).
+    // No referral in harvest (no referral account), so the full collected
+    // amount is distributable; referral share folds into treasury.
     if collected_quote > 0 {
-        let ip_owner = safe_mul_div_cast_u64(
+        let (ip_owner, airdrop, treasury) = distribute_quote_fee(
             collected_quote,
-            config.ip_owner_share.into(),
-            precision,
-            Rounding::Down,
+            config.ip_owner_share,
+            config.airdrop_share,
         )?;
-        let airdrop = safe_mul_div_cast_u64(
-            collected_quote,
-            config.airdrop_share.into(),
-            precision,
-            Rounding::Down,
-        )?;
-        let creator = safe_mul_div_cast_u64(
-            collected_quote,
-            config.creator_share.into(),
-            precision,
-            Rounding::Down,
-        )?;
-        // Remainder (includes referral_share since no referral in harvest) → treasury
-        let treasury = collected_quote
-            .safe_sub(ip_owner)?
-            .safe_sub(airdrop)?
-            .safe_sub(creator)?;
 
         pool.ip_owner_quote_fee = pool.ip_owner_quote_fee.safe_add(ip_owner)?;
         pool.airdrop_quote_fee = pool.airdrop_quote_fee.safe_add(airdrop)?;
-        pool.creator_quote_fee = pool.creator_quote_fee.safe_add(creator)?;
         pool.protocol_quote_fee = pool.protocol_quote_fee.safe_add(treasury)?;
     }
 
     // --- 6. Distribute collected token (base) fees ---
-    // Same logic as apply_swap_result base_fee distribution in virtual_pool.rs.
+    // SPEC-DBC-004 Phase 2 (REQ-S-005): same recipient ratios as
+    // `apply_swap_result` base distribution. Implementation centralized in
+    // `state::fee::distribute_base_fee`.
     if collected_base > 0 {
-        let token_airdrop = safe_mul_div_cast_u64(
-            collected_base,
-            config.token_airdrop_share.into(),
-            precision,
-            Rounding::Down,
-        )?;
-        let ip_treasury = collected_base.safe_sub(token_airdrop)?;
+        let (token_airdrop, ip_treasury) =
+            distribute_base_fee(collected_base, config.token_airdrop_share)?;
 
         pool.token_airdrop_base_fee = pool.token_airdrop_base_fee.safe_add(token_airdrop)?;
         pool.ip_treasury_base_fee = pool.ip_treasury_base_fee.safe_add(ip_treasury)?;

@@ -57,6 +57,7 @@ import { getOrCreateAssociatedTokenAccount } from "./utils/token";
 const DAMM_V1_SWAP_ENUM_IN_JUP_V6 = 19;
 const DAMM_V2_SWAP_ENUM_IN_JUP_V6 = 77;
 
+// audit: F-045 — Tier 1 deletion EvtClaimProtocolLiquidityMigrationFee
 describe.skip("Claim protocol liquidity migration fee", () => {
   let svm: LiteSVM;
   let admin: Keypair;

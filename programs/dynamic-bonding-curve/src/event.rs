@@ -103,12 +103,6 @@ pub struct EvtCreateConfigV2 {
     pub config_parameters: ConfigParameters,
 }
 
-/// Create claim fee operator
-#[event]
-pub struct EvtCreateClaimFeeOperator {
-    pub operator: Pubkey,
-}
-
 /// Close claim fee operator
 #[event]
 pub struct EvtCloseClaimFeeOperator {
@@ -166,6 +160,18 @@ pub struct EvtClaimProtocolFee {
     pub token_quote_amount: u64,
 }
 
+/// Emitted by `claim_token_airdrop_fee` (SPEC-DBC-004 REQ-S-007 Phase 5.5).
+/// Token-only airdrop fee drain — operators with `ClaimAirdrop` permission
+/// move accumulated `pool.token_airdrop_base_fee` to the operator-supplied
+/// destination so the backend can perform off-chain UGC distribution.
+#[event]
+pub struct EvtClaimTokenAirdropFee {
+    pub pool: Pubkey,
+    pub destination: Pubkey,
+    pub token_base_amount: u64,
+    pub timestamp: i64,
+}
+
 #[event]
 pub struct EvtClaimTradingFee {
     pub pool: Pubkey,
@@ -173,22 +179,22 @@ pub struct EvtClaimTradingFee {
     pub token_quote_amount: u64,
 }
 
+// SPEC-DBC-004 Phase 3 (REQ-I-001): `EvtClaimCreatorTradingFee` removed
+// alongside the `claim_creator_trading_fee` instruction.
+
+/// Emitted by `claim_ip_owner_fee` (SPEC-DBC-004 Phase 6 REQ-I-003).
+///
+/// `routed_to_vault: true` indicates the quote fee was forwarded to the
+/// `ip-owner-vault` program via CPI for linear vesting; `false` would indicate
+/// a legacy direct transfer (not currently used post-Phase 6).
 #[event]
-pub struct EvtClaimCreatorTradingFee {
+pub struct EvtClaimIpOwnerFee {
     pub pool: Pubkey,
-    pub token_base_amount: u64,
+    pub ip_owner: Pubkey,
+    pub vault: Pubkey,
     pub token_quote_amount: u64,
-}
-
-#[event]
-pub struct EvtCreateMeteoraMigrationMetadata {
-    pub virtual_pool: Pubkey,
-}
-
-#[event]
-pub struct EvtPartnerWithdrawSurplus {
-    pub pool: Pubkey,
-    pub surplus_amount: u64,
+    pub routed_to_vault: bool,
+    pub timestamp: i64,
 }
 
 #[event]
@@ -219,12 +225,6 @@ pub struct EvtWithdrawMigrationFee {
 }
 
 #[event]
-pub struct EvtPartnerWithdrawMigrationFee {
-    pub pool: Pubkey,
-    pub fee: u64,
-}
-
-#[event]
 pub struct EvtClaimPoolCreationFee {
     pub pool: Pubkey,
     pub receiver: Pubkey,
@@ -237,13 +237,6 @@ pub struct EvtPartnerClaimPoolCreationFee {
     pub partner: Pubkey,
     pub creation_fee: u64,
     pub fee_receiver: Pubkey,
-}
-
-#[event]
-pub struct EvtClaimProtocolLiquidityMigrationFee {
-    pub pool: Pubkey,
-    pub token_base_amount: u64,
-    pub token_quote_amount: u64,
 }
 
 #[event]

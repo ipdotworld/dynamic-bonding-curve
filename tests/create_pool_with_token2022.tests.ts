@@ -281,6 +281,7 @@ describe("Create pool with token2022", () => {
     await swap(svm, program, params);
   });
 
+  // audit: F-014 — Partner trading-fee path removed in Phase 1 (Tier 2)
   it.skip("Partner claim trading fee", async () => {
     const claimTradingFeeParams: ClaimTradeFeeParams = {
       feeClaimer: partner,
@@ -291,6 +292,7 @@ describe("Create pool with token2022", () => {
     await claimTradingFee(svm, program, claimTradingFeeParams);
   });
 
+  // audit: F-015 — Token-2022 program env requirement
   it.skip("Operator claim protocol fee", async () => {
     await claimProtocolFee(svm, program, {
       pool: virtualPool,

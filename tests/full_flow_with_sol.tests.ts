@@ -255,6 +255,7 @@ describe("Full flow with spl-token", () => {
   });
 
   // partner_withdraw_surplus removed in A-04 (partner system removal)
+  // audit: F-023 — Partner system removed in A-04 (cleanup-log.md Tier 2)
   it.skip("Partner withdraw surplus", async () => {
     await partnerWithdrawSurplus(svm, program, {
       feeClaimer: partner,
@@ -263,6 +264,7 @@ describe("Full flow with spl-token", () => {
   });
 
   // partner_withdraw_surplus removed in A-04 (partner system removal)
+  // audit: F-024 — Partner system removed in A-04 (cleanup-log.md Tier 2)
   it.skip("Partner can not withdraw again", async () => {
     try {
       await partnerWithdrawSurplus(svm, program, {
@@ -290,6 +292,7 @@ describe("Full flow with spl-token", () => {
   });
 
   // claim_trading_fee removed in A-04 (partner system removal); use claim_creator_trading_fee
+  // audit: F-025 — Partner trading-fee path removed in Phase 1 (Tier 2)
   it.skip("Partner claim trading fee", async () => {
     const claimTradingFeeParams: ClaimTradeFeeParams = {
       feeClaimer: partner,

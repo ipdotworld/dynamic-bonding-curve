@@ -15,7 +15,8 @@ use crate::{
 /// The backend is responsible for distributing these funds to UGC creators
 /// and token holders off-chain.
 ///
-/// Authorization: caller must hold an Operator account with ClaimProtocolFee permission.
+/// Authorization: caller must hold an Operator account with `ClaimAirdrop` permission
+/// (REQ-I-004 Phase 5.4 — was `ClaimProtocolFee` pre-Phase-5).
 #[derive(Accounts)]
 pub struct ClaimAirdropFeeCtx<'info> {
     /// Pool authority PDA that signs token transfers.

@@ -1,0 +1,21 @@
+# tarpaulin.toml — SPEC-DBC-004 Phase 9 (REQ-C-001..003)
+# NOTE: This project uses cargo-llvm-cov as the actual measurement tool because
+# tarpaulin's BPF SBF target compatibility is unreliable on macOS. This file is
+# retained per REQ-C-001 plan listing for documentation-of-intent purposes.
+# The critical-path enumeration here mirrors what coverage-summary.json reports.
+
+[default]
+features = ["local"]
+all-features = false
+workspace = true
+
+# Critical paths (REQ-C-002 ≥ 95% threshold) — kept in sync with coverage-summary.json critical_paths
+critical-paths = [
+  "programs/dynamic-bonding-curve/src/state/fee.rs",
+  "programs/dynamic-bonding-curve/src/state/virtual_pool.rs",
+  "programs/dynamic-bonding-curve/src/instructions/harvest/ix_harvest.rs",
+  "programs/dynamic-bonding-curve/src/instructions/operator/",
+  "programs/dynamic-bonding-curve/src/instructions/admin/",
+  "programs/ip-owner-vault/src/state.rs",
+  "programs/ip-owner-vault/src/instructions/",
+]

@@ -37,6 +37,7 @@ import {
   migrateToDammV2,
 } from "./instructions/dammV2Migration";
 
+// audit: F-022 — Token-2022 fixed supply requires extension support
 describe.skip("Fixed token supply", () => {
   let svm: LiteSVM;
   let admin: Keypair;

@@ -119,7 +119,12 @@ describe("Backwards compatibility - misc", () => {
     await createPartnerMetadata(svm, program, partnerMetadataParams);
   });
 
-  it("claimCreatorTradingFee", async () => {
+  // SPEC-DBC-004 Phase 3 (REQ-I-001): the on-chain `claim_creator_trading_fee`
+  // ix was removed. Pre-recorded fixture (`fixtures/claimCreatorTradingFee.bin`)
+  // can no longer be parsed by the current program; backwards-compat verification
+  // for this surface is intentionally skipped.
+  // audit: F-008 — creator_share removed in Phase 3 (REQ-I-001)
+  it.skip("claimCreatorTradingFee", async () => {
     const partnerMetadataParams = {
       creator: user,
       pool: poolToken2022,

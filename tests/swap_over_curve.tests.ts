@@ -188,6 +188,7 @@ describe("Swap Over the Curve", () => {
 
   // collectFeeMode=0 (QuoteToken) is rejected by the program when baseFeeMode=2;
   // skipping until rate limiter + QuoteToken collect fee mode is supported
+  // audit: F-036 — Partial-fill matrix superseded by REQ-S-005
   it.skip("Partial fill over the curve", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;

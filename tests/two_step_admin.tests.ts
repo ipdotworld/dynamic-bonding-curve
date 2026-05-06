@@ -200,6 +200,7 @@ describe("T-04: 2-Step Admin", () => {
       sendTransactionMaybeThrow(svm, acceptTx, [secondPendingAdmin]);
     } catch (e: any) {
       failed = true;
+      expect(e.message).to.match(/Unauthorized|custom program error/);
     }
     expect(failed, "old pending admin should not be able to accept").to.be.true;
   });

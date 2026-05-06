@@ -45,3 +45,6 @@ pub mod test_panic_defense;
 
 #[cfg(test)]
 pub mod test_fee_distribution;
+
+#[cfg(test)]
+mod test_invalid_migrated_fee_config;

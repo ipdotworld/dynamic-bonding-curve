@@ -37,6 +37,7 @@ import { expect } from "chai";
 import { LiteSVM, TransactionMetadata } from "litesvm";
 import { wrapSOL } from "./utils/token";
 
+// audit: F-020 — First-swap fee model superseded by IPWorld 4-way
 describe.skip("First swap", () => {
   let svm: LiteSVM;
   let partner: Keypair;
@@ -53,6 +54,7 @@ describe.skip("First swap", () => {
     await wrapSOL(svm, partner, new BN(LAMPORTS_PER_SOL * 10));
   });
 
+  // audit: F-021 — First-swap fee model superseded by IPWorld 4-way
   it.skip("Charge min fee for bundled swap ix", async () => {
     const {
       baseMintKP,
@@ -119,6 +121,7 @@ describe.skip("First swap", () => {
     expect(totalFeeCharged.eq(expectedFee2)).to.be.true;
   });
 
+  // audit: F-019 — First-swap fee model superseded by IPWorld 4-way
   it.skip("Charge cliff fee if no sysvar instruction passed in", async () => {
     const {
       baseMintKP,

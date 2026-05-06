@@ -37,6 +37,7 @@ import {
 } from "./instructions/dammV2Migration";
 
 describe("Create locker", () => {
+  // audit: F-013 — Locker program out of scope
   describe.skip("Create locker for spl-token", () => {
     let svm: LiteSVM;
     let admin: Keypair;
@@ -223,6 +224,7 @@ describe("Create locker", () => {
     });
   });
 
+  // audit: F-012 — Locker program out of scope
   describe.skip("Create locker for token2022", () => {
     let svm: LiteSVM;
     let admin: Keypair;

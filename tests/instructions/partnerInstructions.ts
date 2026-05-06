@@ -115,11 +115,11 @@ export type ConfigParameters = {
   enableFirstSwapWithMinFee: boolean;
   compoundingFeeBps: number;
   curve: Array<LiquidityDistributionParameters>;
-  // Fee share parameters (new fields)
+  // Fee share parameters (IPWorld 4-way SELL; SPEC-DBC-004 Phase 3 — REQ-I-001
+  // removed `creatorShare` from on-chain `PoolConfig`)
   ipOwnerShare: number;
   airdropShare: number;
   referralShare: number;
-  creatorShare: number;
   tokenAirdropShare: number;
 };
 
@@ -156,11 +156,13 @@ export async function createConfig(
     };
   }
 
-  // Apply defaults for new fee share parameters if not provided
+  // Apply defaults for IPWorld 4-way SELL fee shares if not provided.
+  // Note: `creatorShare` was removed in SPEC-DBC-004 Phase 3 (REQ-I-001).
+  // Any legacy callers passing it via spread will have their value silently
+  // dropped — `createConfig` below includes only the supported fields.
   const ipOwnerShare = instructionParams.ipOwnerShare ?? 50000;
   const airdropShare = instructionParams.airdropShare ?? 30000;
   const referralShare = instructionParams.referralShare ?? 20000;
-  const creatorShare = instructionParams.creatorShare ?? 100000;
   const tokenAirdropShare = instructionParams.tokenAirdropShare ?? 50000;
 
   // Ensure collectFeeMode is OutputToken (1), not QuoteToken (0) for most
@@ -202,7 +204,6 @@ export async function createConfig(
       ipOwnerShare,
       airdropShare,
       referralShare,
-      creatorShare,
       tokenAirdropShare,
       padding: new Array(2).fill(0),
     })

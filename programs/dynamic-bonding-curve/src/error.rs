@@ -87,9 +87,6 @@ pub enum PoolError {
     #[msg("Leftover has been withdraw")]
     LeftoverHasBeenWithdraw,
 
-    #[msg("Total base token is exceeded max supply")]
-    TotalBaseTokenExceedMaxSupply,
-
     #[msg("Unsupport native mint token 2022")]
     UnsupportNativeMintToken2022,
 
@@ -152,9 +149,6 @@ pub enum PoolError {
     #[msg("Amount left is not zero")]
     AmountLeftIsNotZero,
 
-    #[msg("Next sqrt price is smaller than start sqrt price")]
-    NextSqrtPriceIsSmallerThanStartSqrtPrice,
-
     #[msg("Invalid min base fee")]
     InvalidMinBaseFee,
 
@@ -178,9 +172,6 @@ pub enum PoolError {
 
     #[msg("Invalid fee market cap scheduler")]
     InvalidFeeMarketCapScheduler,
-
-    #[msg("Fail to validate first swap with minimum fee")]
-    FirstSwapValidationFailed,
 
     #[msg("Incorrect ATA")]
     IncorrectATA,
@@ -250,6 +241,12 @@ pub enum PoolError {
 
     #[msg("IP treasury address is not set — call set_ip_treasury first")]
     IpTreasuryNotSet,
+
+    #[msg("Migrated DAMM v2 fee config violates IPWorld constraint (OnlyB + zero compounding)")]
+    InvalidMigratedFeeConfig,
+
+    #[msg("Operator permission slot is reserved or no longer supported — see SPEC-DBC-004 REQ-I-004")]
+    UnsupportedOperatorPermission,
 }
 
 impl From<ProtozolZapError> for PoolError {

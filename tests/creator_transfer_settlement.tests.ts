@@ -121,6 +121,7 @@ function serializeTradeAuth(user: PublicKey, expiresAt: number): Buffer {
   return buf;
 }
 
+// audit: F-016 — creator_share + claim_creator_trading_fee removed in Phase 3
 describe.skip("T-07: Creator Transfer Settlement", () => {
   let admin: Keypair;
   let authority: Keypair;
@@ -258,7 +259,6 @@ describe.skip("T-07: Creator Transfer Settlement", () => {
         ipOwnerShare: 50000,
         airdropShare: 30000,
         referralShare: 20000,
-        creatorShare: 100000,
         tokenAirdropShare: 50000,
         curve: curves,
       } as any)
@@ -471,7 +471,10 @@ describe.skip("T-07: Creator Transfer Settlement", () => {
     const quoteVault = deriveTokenVault(quoteMint, pool);
 
     // Claim all creator trading fees
-    const claimTx = await program.methods
+    // SPEC-DBC-004 Phase 3: claimCreatorTradingFee removed from IDL.
+    // describe.skip on this suite means this branch never executes; cast preserves
+    // TS compilation against the new IDL.
+    const claimTx = await (program.methods as any)
       .claimCreatorTradingFee(new BN("18446744073709551615"), new BN("18446744073709551615"))
       .accountsPartial({
         poolAuthority: derivePoolAuthority(),
@@ -537,7 +540,7 @@ describe.skip("T-07: Creator Transfer Settlement", () => {
     const oldCreatorQuoteAta = getAssociatedTokenAddressSync(quoteMint, creator.publicKey);
 
     try {
-      const claimAsOldCreatorTx = await program.methods
+      const claimAsOldCreatorTx = await (program.methods as any)
         .claimCreatorTradingFee(new BN("18446744073709551615"), new BN("18446744073709551615"))
         .accountsPartial({
           poolAuthority: derivePoolAuthority(),

@@ -18,7 +18,7 @@ use crate::{
     params::swap::TradeDirection,
     safe_math::SafeMath,
     state::{
-        fee::{FeeMode, FeeOnAmountResult, VolatilityTracker},
+        fee::{distribute_base_fee, distribute_quote_fee, FeeMode, FeeOnAmountResult, VolatilityTracker},
         PoolConfig,
     },
     u128x128_math::Rounding,
@@ -110,12 +110,13 @@ pub struct VirtualPool {
     pub protocol_base_fee: u64,
     /// protocol quote fee
     pub protocol_quote_fee: u64,
-    /// Deprecated: partner base fee no longer accumulated post A-04 (IPWorld fee model).
-    /// Kept as zero-pad to preserve zero_copy layout of existing on-chain accounts.
-    pub _deprecated_partner_base_fee: u64,
-    /// Deprecated: partner quote fee no longer accumulated post A-04 (IPWorld fee model).
-    /// Kept as zero-pad to preserve zero_copy layout of existing on-chain accounts.
-    pub _deprecated_partner_quote_fee: u64,
+    /// Padding (was `_deprecated_partner_base_fee` u64). Removed from API in
+    /// SPEC-DBC-004 Phase 2 Step 2.6; layout preserved as `u64` zero-pad to
+    /// keep on-chain account byte size unchanged. Phase 3 (INIT_SPACE recompute,
+    /// REQ-I-001) decides whether to fold this slot into a larger reserved block.
+    pub _padding_partner_base: u64,
+    /// Padding (was `_deprecated_partner_quote_fee` u64). Same rationale as above.
+    pub _padding_partner_quote: u64,
     /// current price
     pub sqrt_price: u128,
     /// Activation point
@@ -142,11 +143,6 @@ pub struct VirtualPool {
     pub metrics: PoolMetrics,
     /// The time curve is finished
     pub finish_curve_timestamp: u64,
-    /// Deprecated: creator base fee no longer accumulated post A-04 (IPWorld fee model).
-    /// Kept as zero-pad to preserve zero_copy layout of existing on-chain accounts.
-    pub _deprecated_creator_base_fee: u64,
-    /// creator quote fee (still accumulated via apply_swap_result creator_share)
-    pub creator_quote_fee: u64,
     /// legacy creation fee bits, we dont use this now
     pub legacy_creation_fee_bits: u8,
     /// pool creation fee claim status
@@ -171,7 +167,7 @@ pub struct VirtualPool {
     pub _padding_reserved: u64,
 }
 
-const_assert_eq!(VirtualPool::INIT_SPACE, 432);
+const_assert_eq!(VirtualPool::INIT_SPACE, 416);
 
 pub const PARTNER_MIGRATION_FEE_MASK: u8 = 0b100;
 pub const CREATOR_MIGRATION_FEE_MASK: u8 = 0b010;
@@ -848,7 +844,7 @@ impl VirtualPool {
                     current_sqrt_price,
                     reference_sqrt_price,
                     config.curve[i].liquidity,
-                    Rounding::Up, // TODO check whether we should use round down or round up
+                    Rounding::Up,
                 )?;
                 if U256::from(amount_left) < max_amount_in {
                     let next_sqrt_price = get_next_sqrt_price_from_input(
@@ -937,13 +933,10 @@ impl VirtualPool {
             // BUY (SOL→token): base_fee distribution
             // token_airdrop_share% → token_airdrop_base_fee counter
             // remainder           → ip_treasury_base_fee counter
-            let token_airdrop = safe_mul_div_cast_u64(
-                total_fee,
-                config.token_airdrop_share.into(),
-                crate::state::config::FEE_SHARE_PRECISION as u64,
-                Rounding::Down,
-            )?;
-            let ip_treasury = total_fee.safe_sub(token_airdrop)?;
+            // SPEC-DBC-004 Phase 2 (REQ-S-005): inline math relocated to
+            // `state::fee::distribute_base_fee`.
+            let (token_airdrop, ip_treasury) =
+                distribute_base_fee(total_fee, config.token_airdrop_share)?;
 
             self.token_airdrop_base_fee = self.token_airdrop_base_fee.safe_add(token_airdrop)?;
             self.ip_treasury_base_fee = self.ip_treasury_base_fee.safe_add(ip_treasury)?;
@@ -954,45 +947,31 @@ impl VirtualPool {
 
             self.metrics.accumulate_fee(total_fee, 0, true)?;
         } else {
-            // SELL (token→SOL): quote_fee distribution
+            // SELL (token→SOL): quote_fee distribution (IPWorld 4-way SELL model)
             // ip_owner_share%   → ip_owner_quote_fee counter
             // airdrop_share%    → airdrop_quote_fee counter
             // referral_share%   → handled externally via swap_result.referral_fee (immediate transfer)
-            // creator_share%    → creator_quote_fee counter
             // remainder         → protocol_quote_fee counter (IPWorld treasury)
-            let precision = crate::state::config::FEE_SHARE_PRECISION as u64;
+            // SPEC-DBC-004 Phase 2 (REQ-S-005): inline math relocated to
+            // `state::fee::distribute_quote_fee`.
+            // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed; the
+            // `creator` recipient bucket is gone. Distribution is now 3-way
+            // (ip_owner + airdrop + treasury) at the helper level; referral is
+            // applied externally by subtracting `referral_fee` before calling.
 
             // The referral portion has already been accounted for in swap_result.referral_fee
             // (transferred immediately in the swap handler). We distribute total_fee minus that
             // referral portion among the on-chain counters.
             let distributable = total_fee.safe_sub(referral_fee)?;
 
-            let ip_owner = safe_mul_div_cast_u64(
+            let (ip_owner, airdrop, treasury) = distribute_quote_fee(
                 distributable,
-                config.ip_owner_share.into(),
-                precision,
-                Rounding::Down,
+                config.ip_owner_share,
+                config.airdrop_share,
             )?;
-            let airdrop = safe_mul_div_cast_u64(
-                distributable,
-                config.airdrop_share.into(),
-                precision,
-                Rounding::Down,
-            )?;
-            let creator = safe_mul_div_cast_u64(
-                distributable,
-                config.creator_share.into(),
-                precision,
-                Rounding::Down,
-            )?;
-            let treasury = distributable
-                .safe_sub(ip_owner)?
-                .safe_sub(airdrop)?
-                .safe_sub(creator)?;
 
             self.ip_owner_quote_fee = self.ip_owner_quote_fee.safe_add(ip_owner)?;
             self.airdrop_quote_fee = self.airdrop_quote_fee.safe_add(airdrop)?;
-            self.creator_quote_fee = self.creator_quote_fee.safe_add(creator)?;
             self.protocol_quote_fee = self.protocol_quote_fee.safe_add(treasury)?;
 
             self.metrics.accumulate_fee(treasury, distributable, false)?;
@@ -1108,47 +1087,22 @@ impl VirtualPool {
         Ok(amount)
     }
 
-    /// Partner trading fee claim. Post A-04 IPWorld fee model, partner fees are no
-    /// longer accumulated; _deprecated_partner_base_fee / _deprecated_partner_quote_fee
-    /// are always zero for new pools. Legacy pools with residual balance can still drain.
-    pub fn claim_partner_trading_fee(
-        &mut self,
-        max_base_amount: u64,
-        max_quote_amount: u64,
-    ) -> Result<(u64, u64)> {
-        let token_base_amount = self._deprecated_partner_base_fee.min(max_base_amount);
-        let token_quote_amount = self._deprecated_partner_quote_fee.min(max_quote_amount);
-        self._deprecated_partner_base_fee =
-            self._deprecated_partner_base_fee.safe_sub(token_base_amount)?;
-        self._deprecated_partner_quote_fee =
-            self._deprecated_partner_quote_fee.safe_sub(token_quote_amount)?;
-        Ok((token_base_amount, token_quote_amount))
-    }
-
-    /// Creator trading fee claim. Post A-04 IPWorld fee model, creator_base_fee is no
-    /// longer accumulated; _deprecated_creator_base_fee is always zero for new pools.
-    /// creator_quote_fee is still accumulated via apply_swap_result creator_share.
-    pub fn claim_creator_trading_fee(
-        &mut self,
-        max_base_amount: u64,
-        max_quote_amount: u64,
-    ) -> Result<(u64, u64)> {
-        let token_base_amount = self._deprecated_creator_base_fee.min(max_base_amount);
-        let token_quote_amount = self.creator_quote_fee.min(max_quote_amount);
-        self._deprecated_creator_base_fee =
-            self._deprecated_creator_base_fee.safe_sub(token_base_amount)?;
-        self.creator_quote_fee = self.creator_quote_fee.safe_sub(token_quote_amount)?;
-        Ok((token_base_amount, token_quote_amount))
-    }
+    // SPEC-DBC-004 Phase 2 (REQ-S-002): `claim_partner_trading_fee` removed —
+    // had zero callers post Phase 1 partner-ix Tier-2 cleanup. The deprecated
+    // partner fee fields are now `_padding_*` (byte layout preserved until
+    // Phase 3 INIT_SPACE recompute).
+    //
+    // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed
+    // alongside `creator_quote_fee` and `_deprecated_creator_base_fee` fields.
+    // The creator side of the IPWorld 4-way SELL distribution is fully retired
+    // (creator_share = 0 implicit); creator earnings flow exclusively via the
+    // existing `creator_withdraw_surplus` path.
 
     /// Returns total base fees that must remain in the vault and cannot be migrated.
-    /// Post A-04: only protocol_base_fee is accumulated; deprecated partner/creator
-    /// base fee fields are always zero for new pools but drain-safe for legacy pools.
+    /// Post Phase 3 (REQ-I-001): only `protocol_base_fee` is accumulated; the
+    /// partner-deprecated and creator-deprecated terms have both been removed.
     pub fn get_protocol_and_trading_base_fee(&self) -> Result<u64> {
-        Ok(self
-            .protocol_base_fee
-            .safe_add(self._deprecated_partner_base_fee)?
-            .safe_add(self._deprecated_creator_base_fee)?)
+        Ok(self.protocol_base_fee)
     }
 
     pub fn is_curve_complete(&self, migration_threshold: u64) -> bool {

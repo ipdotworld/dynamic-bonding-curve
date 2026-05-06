@@ -27,6 +27,7 @@ import { VirtualCurveProgram } from "./utils/types";
 import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 
+// audit: F-009 — Tier 1 deletion EvtClaimProtocolLiquidityMigrationFee
 describe.skip("Claim protocol liquidity migration fee", () => {
   let svm: LiteSVM;
   let admin: Keypair;

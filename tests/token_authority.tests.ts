@@ -237,6 +237,7 @@ describe("Token authority with token2022", () => {
   });
 });
 
+// audit: F-042 — spl-token authority transfer requires test-validator
 describe.skip("Token authority with spl token", () => {
   let svm: LiteSVM;
   let admin: Keypair;

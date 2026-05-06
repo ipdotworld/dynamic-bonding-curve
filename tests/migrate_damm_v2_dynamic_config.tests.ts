@@ -68,9 +68,11 @@ describe("Migrate to damm v2 with dynamic config pool", () => {
   });
 
   it("Full flow migrated to damm v2 new create pool endpoint", async () => {
+    // SPEC-DBC-004 REQ-I-002: collectFeeMode must be 0 (QuoteToken/OnlyB);
+    // value 1 (OutputToken/BothToken) is rejected with InvalidMigratedFeeConfig.
     const migratedPoolFee = {
       poolFeeBps: 100,
-      collectFeeMode: 1,
+      collectFeeMode: 0,
       dynamicFee: 0,
     };
 
@@ -109,7 +111,9 @@ describe("Migrate to damm v2 with dynamic config pool", () => {
     const poolConfigState = getConfig(svm, program, poolConfig);
     // validate pool config
     expect(poolConfigState.migratedDynamicFee).eq(migratedPoolFee.dynamicFee);
-    expect(poolConfigState.collectFeeMode).eq(migratedPoolFee.collectFeeMode);
+    expect(poolConfigState.migratedCollectFeeMode).eq(
+      migratedPoolFee.collectFeeMode
+    );
     const feeBpsValue = poolConfigState.migratedPoolFeeBps;
     expect(feeBpsValue).eq(migratedPoolFee.poolFeeBps);
 
@@ -134,9 +138,10 @@ describe("Migrate to damm v2 with dynamic config pool", () => {
   });
 
   it("Full flow migrated to damm v2 with fee market cap scheduler", async () => {
+    // SPEC-DBC-004 REQ-I-002: only OnlyB (collectFeeMode == 0) is allowed.
     const migratedPoolFee = {
       poolFeeBps: 1000,
-      collectFeeMode: 1,
+      collectFeeMode: 0,
       dynamicFee: 1,
     };
 
@@ -175,7 +180,9 @@ describe("Migrate to damm v2 with dynamic config pool", () => {
 
     // validate pool config
     expect(poolConfigState.migratedDynamicFee).eq(migratedPoolFee.dynamicFee);
-    expect(poolConfigState.collectFeeMode).eq(migratedPoolFee.collectFeeMode);
+    expect(poolConfigState.migratedCollectFeeMode).eq(
+      migratedPoolFee.collectFeeMode
+    );
     const feeBpsValue = poolConfigState.migratedPoolFeeBps;
     expect(feeBpsValue).eq(migratedPoolFee.poolFeeBps);
 
@@ -215,7 +222,13 @@ describe("Migrate to damm v2 with dynamic config pool", () => {
     );
   });
 
-  it("Full flow migrated to damm v2 with compounding fee", async () => {
+  // SPEC-DBC-004 REQ-I-002 forbids both Compounding mode AND
+  // non-zero compoundingFeeBps. Skipping this test until a follow-up SPEC
+  // either removes the compounding feature entirely or reintroduces it
+  // behind a separate gate. Backwards-compat fixture remains available;
+  // the on-chain behavior is now `InvalidMigratedFeeConfig` (0x17be).
+  // audit: F-031 — REQ-I-002 rejects collectFeeMode=Compounding (Phase 4)
+  it.skip("Full flow migrated to damm v2 with compounding fee", async () => {
     const migratedPoolFee = {
       poolFeeBps: 100,
       collectFeeMode: 2, // Compounding

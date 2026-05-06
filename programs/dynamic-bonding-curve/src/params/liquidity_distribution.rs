@@ -46,7 +46,7 @@ pub fn get_base_token_for_swap(
                 lower_sqrt_price,
                 sqrt_migration_price,
                 curve[i].liquidity,
-                Rounding::Up, // TODO check whether we should use round down or round up
+                Rounding::Up,
             )?;
             total_amount = total_amount.safe_add(delta_amount)?;
             break;
@@ -55,7 +55,7 @@ pub fn get_base_token_for_swap(
                 lower_sqrt_price,
                 curve[i].sqrt_price,
                 curve[i].liquidity,
-                Rounding::Up, // TODO check whether we should use round down or round up
+                Rounding::Up,
             )?;
             total_amount = total_amount.safe_add(delta_amount)?;
         }
@@ -74,7 +74,7 @@ pub fn get_migration_threshold_price(
         next_sqrt_price,
         curve[0].sqrt_price,
         curve[0].liquidity,
-        Rounding::Up, // TODO check whether we should use round down or round up
+        Rounding::Up,
     )?;
     if total_amount > U256::from(migration_threshold) {
         next_sqrt_price = get_next_sqrt_price_from_input(
@@ -94,7 +94,7 @@ pub fn get_migration_threshold_price(
                 next_sqrt_price,
                 curve[i].sqrt_price,
                 curve[i].liquidity,
-                Rounding::Up, // TODO check whether we should use round down or round up
+                Rounding::Up,
             )?;
             if max_amount > U256::from(amount_left) {
                 next_sqrt_price = get_next_sqrt_price_from_input(

@@ -30,11 +30,11 @@ pub struct ClaimIpTreasuryFeeCtx<'info> {
     pub config: AccountInfo<'info>,
 
     /// IP owner verification record for this pool.
-    /// Constraint: ip_treasury must be set and match the caller.
+    /// Constraint: ip_treasury must be set (REQ-I-005) and match the caller.
     #[account(
         seeds = [TokenVerification::SEED, pool.key().as_ref()],
         bump = token_verification.bump,
-        constraint = token_verification.ip_treasury != Pubkey::default() @ PoolError::Unauthorized,
+        constraint = token_verification.ip_treasury != Pubkey::default() @ PoolError::IpTreasuryNotSet,
         constraint = token_verification.ip_treasury == ip_treasury.key() @ PoolError::Unauthorized,
     )]
     pub token_verification: Account<'info, TokenVerification>,

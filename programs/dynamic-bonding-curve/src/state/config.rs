@@ -512,8 +512,12 @@ pub struct PoolConfig {
     pub airdrop_share: u32,
     /// IPWorld fee share: referral share of quote fee (SELL side), in FEE_SHARE_PRECISION units
     pub referral_share: u32,
-    /// IPWorld fee share: creator share of quote fee (SELL side), in FEE_SHARE_PRECISION units
-    pub creator_share: u32,
+    /// Padding (formerly `creator_share: u32`, removed in SPEC-DBC-004 Phase 3 — REQ-I-001).
+    /// Retained as 4-byte zero-pad so `swap_base_amount: u64` keeps its
+    /// 8-byte alignment (Pod / zero_copy requirement). On-chain layout for the
+    /// post-`creator_share` portion is preserved; PoolConfig::INIT_SPACE remains
+    /// at the pre-Phase-3 value (1008).
+    pub _padding_creator_share: [u8; 4],
     /// Collect fee mode
     pub collect_fee_mode: u8,
     /// migration option
@@ -749,7 +753,6 @@ impl PoolConfig {
         ip_owner_share: u32,
         airdrop_share: u32,
         referral_share: u32,
-        creator_share: u32,
         token_airdrop_share: u32,
     ) -> Result<()> {
         self.version = 0;
@@ -805,11 +808,11 @@ impl PoolConfig {
 
         self.enable_first_swap_with_min_fee = enable_creator_first_swap_with_min_fee;
 
-        // IPWorld flat fee distribution shares
+        // IPWorld flat fee distribution shares (4-way SELL: ip_owner, airdrop, referral, treasury)
+        // — `creator_share` removed in SPEC-DBC-004 Phase 3 (REQ-I-001).
         self.ip_owner_share = ip_owner_share;
         self.airdrop_share = airdrop_share;
         self.referral_share = referral_share;
-        self.creator_share = creator_share;
         self.token_airdrop_share = token_airdrop_share;
 
         for i in 0..curve.len() {
@@ -931,69 +934,6 @@ impl PoolConfig {
 
     pub fn is_fixed_token_supply(&self) -> bool {
         self.fixed_token_supply_flag == 1
-    }
-
-    pub fn get_liquidity_distribution(&self, liquidity: u128) -> Result<LiquidityDistribution> {
-        let partner_permanent_locked_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.partner_permanent_locked_liquidity_percentage.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let partner_vested_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.partner_liquidity_vesting_info
-                .vesting_percentage
-                .into(),
-            100,
-            Rounding::Down,
-        )?;
-        let partner_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.partner_liquidity_percentage.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let creator_permanent_locked_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.creator_permanent_locked_liquidity_percentage.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let creator_vested_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.creator_liquidity_vesting_info
-                .vesting_percentage
-                .into(),
-            100,
-            Rounding::Down,
-        )?;
-
-        let creator_liquidity = liquidity
-            .safe_sub(partner_liquidity)?
-            .safe_sub(partner_permanent_locked_liquidity)?
-            .safe_sub(partner_vested_liquidity)?
-            .safe_sub(creator_permanent_locked_liquidity)?
-            .safe_sub(creator_vested_liquidity)?;
-
-        Ok(LiquidityDistribution {
-            partner: LiquidityDistributionItem {
-                unlocked_liquidity: partner_liquidity,
-                permanent_locked_liquidity: partner_permanent_locked_liquidity,
-                vested_liquidity: partner_vested_liquidity,
-                permanent_locked_liquidity_percentage: self
-                    .partner_permanent_locked_liquidity_percentage,
-                liquidity_vesting_info: self.partner_liquidity_vesting_info,
-            },
-            creator: LiquidityDistributionItem {
-                unlocked_liquidity: creator_liquidity,
-                permanent_locked_liquidity: creator_permanent_locked_liquidity,
-                vested_liquidity: creator_vested_liquidity,
-                permanent_locked_liquidity_percentage: self
-                    .creator_permanent_locked_liquidity_percentage,
-                liquidity_vesting_info: self.creator_liquidity_vesting_info,
-            },
-        })
     }
 
     /// Splits surplus between partner and creator based on creator_trading_fee_percentage.
@@ -1266,39 +1206,6 @@ impl LiquidityDistributionItem {
             .get_damm_v2_vesting_parameters(self.vested_liquidity, current_timestamp)
     }
 
-    pub fn adjust_liquidity(&mut self, adjusted_total_liquidity: u128) -> Result<()> {
-        let vesting_percentage = self.liquidity_vesting_info.vesting_percentage;
-        let total_locked_percentage =
-            vesting_percentage.safe_add(self.permanent_locked_liquidity_percentage)?;
-
-        if total_locked_percentage == 0 {
-            // both vesting_percentage and permanent_locked_liquidity_percentage are equal zero
-            self.unlocked_liquidity = adjusted_total_liquidity;
-            self.permanent_locked_liquidity = 0;
-            self.vested_liquidity = 0;
-        } else {
-            let unlocked_liquidity = adjusted_total_liquidity.min(self.unlocked_liquidity);
-            let liquidity_subject_to_lock =
-                adjusted_total_liquidity.safe_sub(unlocked_liquidity)?;
-
-            let vested_liquidity = safe_mul_div_cast_u128(
-                liquidity_subject_to_lock,
-                vesting_percentage.into(),
-                total_locked_percentage.into(),
-                Rounding::Down,
-            )?;
-
-            let permanent_locked_liquidity =
-                liquidity_subject_to_lock.safe_sub(vested_liquidity)?;
-
-            self.unlocked_liquidity = unlocked_liquidity;
-            self.permanent_locked_liquidity = permanent_locked_liquidity;
-            self.vested_liquidity = vested_liquidity;
-            // is this fine to dont re-calculate permanent_locked_liquidity_percentage and vesting_percentage?
-        }
-
-        Ok(())
-    }
 }
 
 pub struct MigrationAmount {

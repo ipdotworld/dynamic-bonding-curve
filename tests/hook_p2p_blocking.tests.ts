@@ -262,6 +262,7 @@ describe("T-06: Hook P2P Blocking", () => {
     );
   });
 
+  // audit: F-026 — Hook CPI requires solana-test-validator
   it.skip("M-HOOK-001: P2P transfer blocked — requires solana-test-validator (LiteSVM skips Transfer Hook CPI)", () => {
     // Fund buyer1 from vault (valid vault transfer)
     const buyer1 = fund(svm);

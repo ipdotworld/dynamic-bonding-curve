@@ -534,7 +534,6 @@ export function designCurve(
     ipOwnerShare: 50000,
     airdropShare: 30000,
     referralShare: 20000,
-    creatorShare: 100000,
     tokenAirdropShare: 50000,
   };
   return instructionParams;
@@ -710,7 +709,6 @@ export function designGraphCurve(
     ipOwnerShare: 50000,
     airdropShare: 30000,
     referralShare: 20000,
-    creatorShare: 100000,
     tokenAirdropShare: 50000,
   };
   return instructionParams;

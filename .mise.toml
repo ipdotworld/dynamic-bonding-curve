@@ -1,0 +1,9 @@
+# Pinned to Node 22 LTS for SPEC-DBC-004.
+# Reason: ts-mocha 10.1.0 depends on ts-node 7.0.1 (2018 release) which does not
+# handle Node 24's strict ESM import attributes (TypeError on JSON import).
+# Node 22 LTS preserves backward compat (deprecation warning only) so the
+# existing test infrastructure continues to work without code-level migration.
+# When the test infrastructure is migrated (separate SPEC), this file can be
+# removed and the project can move to a newer Node major.
+[tools]
+node = "22"

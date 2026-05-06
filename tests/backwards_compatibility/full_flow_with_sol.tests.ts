@@ -41,6 +41,7 @@ import {
   Swap2Params,
 } from "./instructions/userInstructions";
 
+// audit: F-007 — Backwards-compat fixture predates Phase 1+3
 describe.skip("Backwards compatibility - DAMM full flow", () => {
   let svm: LiteSVM;
   let admin: Keypair;

@@ -88,13 +88,25 @@ pub mod dynamic_bonding_curve {
 
     /// Operator claims accumulated airdrop fees: SOL (quote) and token (base).
     /// Backend distributes these to UGC creators and holders off-chain.
-    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ClaimProtocolFee))]
+    /// Authorization: Operator with `ClaimAirdrop` permission (REQ-I-004 Phase 5.4).
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ClaimAirdrop))]
     pub fn claim_airdrop_fee<'c: 'info, 'info>(
         ctx: Context<'_, '_, 'c, 'info, ClaimAirdropFeeCtx<'info>>,
         max_quote_amount: u64,
         max_base_amount: u64,
     ) -> Result<()> {
         instructions::handle_claim_airdrop_fee(ctx, max_quote_amount, max_base_amount)
+    }
+
+    /// Operator drains the token-only airdrop fee accumulator (SPEC-DBC-004 REQ-S-007 Phase 5.5).
+    /// Token (base) variant of `claim_airdrop_fee` for cadence-independent backend distribution.
+    /// Authorization: Operator with `ClaimAirdrop` permission.
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ClaimAirdrop))]
+    pub fn claim_token_airdrop_fee<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, ClaimTokenAirdropFeeCtx<'info>>,
+        max_base_amount: u64,
+    ) -> Result<()> {
+        instructions::handle_claim_token_airdrop_fee(ctx, max_base_amount)
     }
 
     /// IP treasury address claims accumulated token (base) fees.
@@ -229,14 +241,10 @@ pub mod dynamic_bonding_curve {
         instructions::handle_create_virtual_pool_metadata(ctx, metadata)
     }
 
-    #[access_control(is_pool_creator(&ctx.accounts.pool, ctx.accounts.creator.key))]
-    pub fn claim_creator_trading_fee<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, ClaimCreatorTradingFeesCtx<'info>>,
-        max_base_amount: u64,
-        max_quote_amount: u64,
-    ) -> Result<()> {
-        instructions::handle_claim_creator_trading_fee(ctx, max_base_amount, max_quote_amount)
-    }
+    // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed.
+    // The creator side of the SELL fee distribution is gone (creator_share field
+    // and creator_quote_fee accumulator both deleted). Creator earnings flow
+    // exclusively via `creator_withdraw_surplus` below.
 
     // withdraw surplus on quote token
     #[access_control(is_pool_creator(&ctx.accounts.virtual_pool, ctx.accounts.creator.key))]

@@ -1,92 +1,28 @@
 #[cfg(test)]
 mod test_fee_distribution {
+    // SPEC-DBC-004 Phase 2 — REQ-S-006: production fee distribution helpers
+    // are now sourced from `state/fee.rs`. The local re-definitions previously
+    // mirrored the apply_swap_result inline logic; both sites converged to
+    // `state::fee::distribute_quote_fee` / `distribute_base_fee` as part of
+    // Phase 2 sub-step 2.3. The test bodies below exercise the production
+    // module directly via `.expect(...)` for the `Result<...>` return type.
+    //
+    // SPEC-DBC-004 Phase 3 — REQ-I-001: `distribute_quote_fee` is now 3-way
+    // (ip_owner + airdrop + treasury). `creator_share` and the `creator`
+    // recipient bucket were removed alongside `creator_quote_fee`.
     use crate::{
         safe_math::SafeMath,
         state::config::FEE_SHARE_PRECISION,
-        u128x128_math::Rounding,
-        utils_math::safe_mul_div_cast_u64,
+        state::fee::{distribute_base_fee, distribute_quote_fee},
     };
 
-    // -------------------------------------------------------------------------
-    // Standalone helpers that mirror the apply_swap_result logic exactly.
-    // Testing these standalone functions avoids the need to instantiate
-    // zero_copy VirtualPool structs in unit tests.
-    // -------------------------------------------------------------------------
-
-    /// Distributes a SELL-side (quote) fee among four recipients.
-    ///
-    /// Returns `(ip_owner, airdrop, creator, treasury)` where
-    /// `ip_owner + airdrop + creator + treasury == distributable`.
-    fn distribute_quote_fee(
-        distributable: u64,
-        ip_owner_share: u32,
-        airdrop_share: u32,
-        creator_share: u32,
-    ) -> (u64, u64, u64, u64) {
-        let precision = FEE_SHARE_PRECISION as u64;
-
-        let ip_owner: u64 = safe_mul_div_cast_u64(
-            distributable,
-            ip_owner_share as u64,
-            precision,
-            Rounding::Down,
-        )
-        .expect("ip_owner overflow");
-
-        let airdrop: u64 = safe_mul_div_cast_u64(
-            distributable,
-            airdrop_share as u64,
-            precision,
-            Rounding::Down,
-        )
-        .expect("airdrop overflow");
-
-        let creator: u64 = safe_mul_div_cast_u64(
-            distributable,
-            creator_share as u64,
-            precision,
-            Rounding::Down,
-        )
-        .expect("creator overflow");
-
-        let treasury = distributable
-            .safe_sub(ip_owner)
-            .unwrap()
-            .safe_sub(airdrop)
-            .unwrap()
-            .safe_sub(creator)
-            .unwrap();
-
-        (ip_owner, airdrop, creator, treasury)
-    }
-
-    /// Distributes a BUY-side (base) fee between two recipients.
-    ///
-    /// Returns `(token_airdrop, ip_treasury)` where
-    /// `token_airdrop + ip_treasury == total_fee`.
-    fn distribute_base_fee(total_fee: u64, token_airdrop_share: u32) -> (u64, u64) {
-        let precision = FEE_SHARE_PRECISION as u64;
-
-        let token_airdrop: u64 = safe_mul_div_cast_u64(
-            total_fee,
-            token_airdrop_share as u64,
-            precision,
-            Rounding::Down,
-        )
-        .expect("token_airdrop overflow");
-
-        let ip_treasury = total_fee.safe_sub(token_airdrop).unwrap();
-
-        (token_airdrop, ip_treasury)
-    }
-
     // =========================================================================
-    // QUOTE FEE DISTRIBUTION TESTS
+    // QUOTE FEE DISTRIBUTION TESTS (3-way: ip_owner + airdrop + treasury)
     // =========================================================================
 
     // -------------------------------------------------------------------------
     // Test 1: Even split — total_fee divisible by all shares
-    // Shares: ip_owner=20%, airdrop=10%, creator=5% → treasury=65%
+    // Shares: ip_owner=20%, airdrop=10% → treasury=70%
     // With a fee of 1_000_000 every portion divides evenly.
     // -------------------------------------------------------------------------
     #[test]
@@ -94,21 +30,18 @@ mod test_fee_distribution {
         let total_fee = 1_000_000u64;
         let ip_owner_share = 200_000u32; // 20%
         let airdrop_share = 100_000u32; // 10%
-        let creator_share = 50_000u32; //  5%
 
-        let (ip_owner, airdrop, creator, treasury) =
-            distribute_quote_fee(total_fee, ip_owner_share, airdrop_share, creator_share);
+        let (ip_owner, airdrop, treasury) =
+            distribute_quote_fee(total_fee, ip_owner_share, airdrop_share)
+                .expect("distribute_quote_fee");
 
         assert_eq!(ip_owner, 200_000, "ip_owner should be 20%");
         assert_eq!(airdrop, 100_000, "airdrop should be 10%");
-        assert_eq!(creator, 50_000, "creator should be 5%");
-        assert_eq!(treasury, 650_000, "treasury should be 65%");
+        assert_eq!(treasury, 700_000, "treasury should be 70%");
 
         // Invariant: no value is created
         let sum = ip_owner
             .safe_add(airdrop)
-            .unwrap()
-            .safe_add(creator)
             .unwrap()
             .safe_add(treasury)
             .unwrap();
@@ -125,15 +58,13 @@ mod test_fee_distribution {
         let total_fee = 1_000_007u64; // not cleanly divisible
         let ip_owner_share = 200_000u32; // 20%
         let airdrop_share = 100_000u32; // 10%
-        let creator_share = 50_000u32; //  5%
 
-        let (ip_owner, airdrop, creator, treasury) =
-            distribute_quote_fee(total_fee, ip_owner_share, airdrop_share, creator_share);
+        let (ip_owner, airdrop, treasury) =
+            distribute_quote_fee(total_fee, ip_owner_share, airdrop_share)
+                .expect("distribute_quote_fee");
 
         let sum = ip_owner
             .safe_add(airdrop)
-            .unwrap()
-            .safe_add(creator)
             .unwrap()
             .safe_add(treasury)
             .unwrap();
@@ -150,7 +81,7 @@ mod test_fee_distribution {
     }
 
     // -------------------------------------------------------------------------
-    // Test 3: Zero shares — ip_owner_share=0, airdrop_share=0, creator_share=0
+    // Test 3: Zero shares — ip_owner_share=0, airdrop_share=0
     // Everything goes to treasury.
     // -------------------------------------------------------------------------
     #[test]
@@ -158,43 +89,40 @@ mod test_fee_distribution {
         let total_fee = 500_000u64;
         let ip_owner_share = 0u32;
         let airdrop_share = 0u32;
-        let creator_share = 0u32;
 
-        let (ip_owner, airdrop, creator, treasury) =
-            distribute_quote_fee(total_fee, ip_owner_share, airdrop_share, creator_share);
+        let (ip_owner, airdrop, treasury) =
+            distribute_quote_fee(total_fee, ip_owner_share, airdrop_share)
+                .expect("distribute_quote_fee");
 
         assert_eq!(ip_owner, 0, "ip_owner must be zero");
         assert_eq!(airdrop, 0, "airdrop must be zero");
-        assert_eq!(creator, 0, "creator must be zero");
         assert_eq!(treasury, total_fee, "treasury must receive everything");
     }
 
     // -------------------------------------------------------------------------
-    // Test 4: Max shares — all shares set to near FEE_SHARE_PRECISION
-    // ip_owner=33%, airdrop=33%, creator=33% → treasury gets 1% remainder.
+    // Test 4: Max shares — both shares set near (FEE_SHARE_PRECISION/2)
+    // ip_owner=49%, airdrop=49% → treasury gets 2% remainder.
     // -------------------------------------------------------------------------
     #[test]
     fn test_quote_fee_max_shares_treasury_gets_minimal_remainder() {
         let total_fee = 1_000_000u64;
-        // 33% + 33% + 33% = 99%; treasury gets the remaining 1%
-        let ip_owner_share = 330_000u32;
-        let airdrop_share = 330_000u32;
-        let creator_share = 330_000u32;
+        // 49% + 49% = 98%; treasury gets the remaining 2%
+        let ip_owner_share = 490_000u32;
+        let airdrop_share = 490_000u32;
 
-        let (ip_owner, airdrop, creator, treasury) =
-            distribute_quote_fee(total_fee, ip_owner_share, airdrop_share, creator_share);
+        let (ip_owner, airdrop, treasury) =
+            distribute_quote_fee(total_fee, ip_owner_share, airdrop_share)
+                .expect("distribute_quote_fee");
 
         // Treasury is the residual — ensures no value leaks
-        let expected_treasury = total_fee - ip_owner - airdrop - creator;
+        let expected_treasury = total_fee - ip_owner - airdrop;
         assert_eq!(treasury, expected_treasury);
 
-        // Treasury must be a small positive value (10_000 = 1%)
+        // Treasury must be a small positive value (20_000 = 2%)
         assert!(treasury > 0, "treasury should be positive with leftover");
 
         let sum = ip_owner
             .safe_add(airdrop)
-            .unwrap()
-            .safe_add(creator)
             .unwrap()
             .safe_add(treasury)
             .unwrap();
@@ -214,7 +142,8 @@ mod test_fee_distribution {
         let total_fee = 2_000_000u64;
         let token_airdrop_share = 300_000u32; // 30%
 
-        let (token_airdrop, ip_treasury) = distribute_base_fee(total_fee, token_airdrop_share);
+        let (token_airdrop, ip_treasury) = distribute_base_fee(total_fee, token_airdrop_share)
+            .expect("distribute_base_fee");
 
         assert_eq!(token_airdrop, 600_000, "token_airdrop should be 30%");
         assert_eq!(ip_treasury, 1_400_000, "ip_treasury should be 70%");
@@ -233,7 +162,8 @@ mod test_fee_distribution {
         let total_fee = 300_000u64;
         let token_airdrop_share = 0u32;
 
-        let (token_airdrop, ip_treasury) = distribute_base_fee(total_fee, token_airdrop_share);
+        let (token_airdrop, ip_treasury) = distribute_base_fee(total_fee, token_airdrop_share)
+            .expect("distribute_base_fee");
 
         assert_eq!(token_airdrop, 0);
         assert_eq!(ip_treasury, total_fee);
@@ -247,7 +177,8 @@ mod test_fee_distribution {
         let total_fee = 750_000u64;
         let token_airdrop_share = FEE_SHARE_PRECISION; // 100%
 
-        let (token_airdrop, ip_treasury) = distribute_base_fee(total_fee, token_airdrop_share);
+        let (token_airdrop, ip_treasury) = distribute_base_fee(total_fee, token_airdrop_share)
+            .expect("distribute_base_fee");
 
         assert_eq!(token_airdrop, total_fee);
         assert_eq!(ip_treasury, 0);
@@ -261,7 +192,8 @@ mod test_fee_distribution {
         let total_fee = 999_999u64;
         let token_airdrop_share = 333_333u32; // ~33.3333%
 
-        let (token_airdrop, ip_treasury) = distribute_base_fee(total_fee, token_airdrop_share);
+        let (token_airdrop, ip_treasury) = distribute_base_fee(total_fee, token_airdrop_share)
+            .expect("distribute_base_fee");
 
         let sum = token_airdrop.safe_add(ip_treasury).unwrap();
         assert_eq!(sum, total_fee, "parts must sum to total fee exactly");

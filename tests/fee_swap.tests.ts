@@ -25,6 +25,7 @@ import {
 import { getVirtualPool } from "./utils/fetcher";
 import { Pool, VirtualCurveProgram } from "./utils/types";
 
+// audit: F-018 — Legacy fee-swap test superseded by Phase 2/3
 describe.skip("Fee Swap test", () => {
   describe("Fee charge on BothToken", () => {
     let svm: LiteSVM;

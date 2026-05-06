@@ -130,6 +130,7 @@ function serializeLinkTokenToIpAuth(pool: PublicKey, ipaId: PublicKey): Buffer {
   return Buffer.concat([pool.toBuffer(), ipaId.toBuffer()]);
 }
 
+// audit: F-027 — verify_token requires Ed25519 + IpworldState (Phase 8)
 describe.skip("T-03: IP Owner Verification", () => {
   let admin: Keypair;
   let authority: Keypair;
@@ -266,7 +267,6 @@ describe.skip("T-03: IP Owner Verification", () => {
         ipOwnerShare: 50000,
         airdropShare: 30000,
         referralShare: 20000,
-        creatorShare: 100000,
         tokenAirdropShare: 50000,
         curve: curves,
       } as any)

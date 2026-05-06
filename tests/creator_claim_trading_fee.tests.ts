@@ -37,6 +37,14 @@ import { getConfig, getVirtualPool } from "./utils/fetcher";
 import { createToken, mintSplTokenTo } from "./utils/token";
 import { VirtualCurveProgram } from "./utils/types";
 
+// SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` ix and the
+// `_deprecated_creator_base_fee` field were removed. The fullFlow helper has
+// been adjusted to exercise the surviving creator-side surface
+// (`creator_withdraw_surplus`) only; the prior assertions that the deprecated
+// creator base fee accumulator was zero are dropped because the field itself
+// no longer exists in `VirtualPool`. The legacy "fee between partner and
+// creator" framing remains for historical naming, but partner trading fee
+// accumulators are zero-padded since Phase 1+2.
 describe("Creator and Partner share trading fees and surplus", () => {
   let svm: LiteSVM;
   let admin: Keypair;
@@ -364,18 +372,15 @@ async function fullFlow(
   };
   await swap(svm, program, params);
 
-  let creatorTradingFeePercentage = configState.creatorTradingFeePercentage;
-  let partnerTradingFeePercentage = 100 - creatorTradingFeePercentage;
   virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
-  // IPWorld A-04: partner fee fields are deprecated and always zero.
-  // creatorTradingFeePercentage is a legacy config field (kept for IDL compatibility).
-  // Fee distribution is now governed by creator_share in FEE_SHARE_PRECISION units.
-  // _deprecated_partner_base_fee and _deprecated_partner_quote_fee are always zero.
-  // _deprecated_creator_base_fee is always zero; creatorQuoteFee accumulates creator_share.
-  expect(virtualPoolState.deprecatedPartnerBaseFee.toString()).eq("0");
-  expect(virtualPoolState.deprecatedPartnerQuoteFee.toString()).eq("0");
-  expect(virtualPoolState.deprecatedCreatorBaseFee.toString()).eq("0");
+  // IPWorld A-04 + SPEC-DBC-004 Phase 2 + Phase 3:
+  // - Partner trading fee fields renamed to `_padding_partner_*` (Phase 2 Step 2.6),
+  //   exposed in IDL as `paddingPartnerBase` / `paddingPartnerQuote`. Still zero-padded.
+  // - `_deprecated_creator_base_fee` and `creator_quote_fee` fields fully removed
+  //   in Phase 3 alongside `creator_share` and the `claim_creator_trading_fee` ix.
+  expect(virtualPoolState.paddingPartnerBase.toString()).eq("0");
+  expect(virtualPoolState.paddingPartnerQuote.toString()).eq("0");
 
   // migrate
   const poolAuthority = derivePoolAuthority();
@@ -402,30 +407,12 @@ async function fullFlow(
   // Anchor ConstraintHasOne error (2001 = 0x7d1) is thrown when creator mismatch
   const errorCodeUnauthorized = "0x7d1";
 
-  // unauthorized pool creator claim trading fee
-  expectThrowsAsync(async () => {
-    await claimCreatorTradingFee(svm, program, {
-      creator: partner,
-      pool: virtualPool,
-      maxBaseAmount: new BN(U64_MAX),
-      maxQuoteAmount: new BN(U64_MAX),
-    });
-  }, errorCodeUnauthorized);
+  // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` ix removed.
+  // The unauthorized-creator-claim and creator-claim assertions previously
+  // exercised the now-deleted ix path. Creator earnings flow exclusively
+  // through `creator_withdraw_surplus`; only that surface is exercised below.
 
-  // creator claim trading fee
-  const claimTradingFeeParams: ClaimCreatorTradeFeeParams = {
-    creator: poolCreator,
-    pool: virtualPool,
-    maxBaseAmount: new BN(U64_MAX),
-    maxQuoteAmount: new BN(U64_MAX),
-  };
-  await claimCreatorTradingFee(svm, program, claimTradingFeeParams);
-
-  // claim_trading_fee removed in A-04; partner uses claimTradingFee which no longer exists
-  // unauthorized creator trying partner fee — skip this section
-  // partner claim trading fee also removed; skip
-
-  // unauthorized creator
+  // unauthorized creator surplus withdraw (has_one = creator constraint)
   expectThrowsAsync(async () => {
     await creatorWithdrawSurplus(svm, program, {
       creator: partner,
@@ -437,7 +424,4 @@ async function fullFlow(
     creator: poolCreator,
     virtualPool,
   });
-
-  // partner_withdraw_surplus removed in A-04 (partner system removal)
-  // skipping partner surplus withdrawal assertions
 }

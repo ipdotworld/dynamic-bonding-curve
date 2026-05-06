@@ -25,6 +25,11 @@ export const IPWORLD_HOOK_PROGRAM_ID = new PublicKey(
   "HooK1111111111111111111111111111111111111111"
 );
 
+// SPEC-DBC-004 Phase 6 (REQ-I-003): IP owner vesting vault program ID.
+export const IP_OWNER_VAULT_PROGRAM_ID = new PublicKey(
+  "HnLA2rxN4uJM1yaRaKZ3kmV9Dqjz7JoQYpk2haVE4gUf"
+);
+
 export const TREASURY = new PublicKey(
   "6aYhxiNGmG8AyU25rh2R7iFu4pBrqnQHpNUGhmsEXRcm"
 );

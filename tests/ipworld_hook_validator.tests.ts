@@ -71,6 +71,7 @@ async function sendV0(ixs: TransactionInstruction[], signers: Keypair[]) {
   return sig;
 }
 
+// audit: F-030 — ipworld-hook full CPI requires test-validator
 describe.skip("Step 1 — ipworld-hook (solana-test-validator)", function () {
   this.timeout(60000);
 
@@ -255,6 +256,10 @@ describe.skip("Step 1 — ipworld-hook (solana-test-validator)", function () {
       await sendV0([ix], [vaultOwner]);
     } catch (e: any) {
       failed = true;
+      // audit: F-005 — strengthened from console-only to error-message check (Phase 7).
+      // Hook program returns "custom program error" — narrow to a specific PoolError when describe.skip is lifted and live error text is captured.
+      const msg = e.logs?.join("\n") || e.message || "";
+      expect(msg).to.match(/custom program error|HookViolation|TransferAmountExceedsCap/);
       console.log("    ✅ 6% transfer correctly rejected");
     }
     expect(failed, "6% transfer should have been rejected").to.be.true;
@@ -302,6 +307,10 @@ describe.skip("Step 1 — ipworld-hook (solana-test-validator)", function () {
       await sendV0([p2pIx], [buyer1]);
     } catch (e: any) {
       failed = true;
+      // audit: F-006 — strengthened from console-only to error-message check (Phase 7).
+      // Narrow to specific PoolError when describe.skip is lifted and live error text is captured.
+      const msg = e.logs?.join("\n") || e.message || "";
+      expect(msg).to.match(/custom program error|HookViolation|TransferNotAllowed|P2PBlocked/);
       console.log("    ✅ P2P transfer correctly rejected");
     }
     expect(failed, "P2P transfer should have been rejected").to.be.true;
