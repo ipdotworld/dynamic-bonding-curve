@@ -73,35 +73,15 @@ describe("Create pool with token2022", () => {
       permissions: [OperatorPermission.ClaimProtocolFee],
     });
 
-    // Write IpworldState PDA directly into LiteSVM (Step 5: launch auth requires this account)
-    // Layout: 8-byte discriminator + 32 authority + 32 admin + 1 bump = 73 bytes
-    const ipworldState = deriveIpworldStateAddress();
-    const [, ipworldBump] = PublicKey.findProgramAddressSync(
-      [Buffer.from("ipworld_state")],
-      DYNAMIC_BONDING_CURVE_PROGRAM_ID
-    );
-    const discriminator = createHash("sha256")
-      .update("account:IpworldState")
-      .digest()
-      .subarray(0, 8);
-    const data = Buffer.alloc(73);
-    discriminator.copy(data, 0);
-    admin.publicKey.toBuffer().copy(data, 8);   // authority
-    admin.publicKey.toBuffer().copy(data, 40);  // admin
-    data.writeUInt8(ipworldBump, 72);           // bump
-    svm.setAccount(ipworldState, {
-      lamports: 1_000_000_000,
-      data,
-      owner: DYNAMIC_BONDING_CURVE_PROGRAM_ID,
-      executable: false,
-    });
+    // IpworldState PDA is already initialized by startSvm() with correct 137-byte layout.
+    // Authority keypair is available via getSvmAuthority() for Ed25519 signing.
   });
 
   it("IpworldState PDA exists", () => {
     const ipworldState = deriveIpworldStateAddress();
     const acc = svm.getAccount(ipworldState);
     expect(acc).to.not.be.null;
-    expect(acc!.data.length).to.equal(73);
+    expect(acc!.data.length).to.equal(137);
   });
 
   it("Partner create config", async () => {
@@ -135,7 +115,7 @@ describe("Create pool with token2022", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1, // damm v2
       tokenType: 1, // token 2022
       tokenDecimal: 6,
@@ -161,7 +141,7 @@ describe("Create pool with token2022", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },
@@ -188,7 +168,6 @@ describe("Create pool with token2022", () => {
     };
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
       instructionParams,
@@ -302,7 +281,8 @@ describe("Create pool with token2022", () => {
     await swap(svm, program, params);
   });
 
-  it("Partner claim trading fee", async () => {
+  // audit: F-014 — Partner trading-fee path removed in Phase 1 (Tier 2)
+  it.skip("Partner claim trading fee", async () => {
     const claimTradingFeeParams: ClaimTradeFeeParams = {
       feeClaimer: partner,
       pool: virtualPool,
@@ -312,7 +292,8 @@ describe("Create pool with token2022", () => {
     await claimTradingFee(svm, program, claimTradingFeeParams);
   });
 
-  it("Operator claim protocol fee", async () => {
+  // audit: F-015 — Token-2022 program env requirement
+  it.skip("Operator claim protocol fee", async () => {
     await claimProtocolFee(svm, program, {
       pool: virtualPool,
       operator: operator,

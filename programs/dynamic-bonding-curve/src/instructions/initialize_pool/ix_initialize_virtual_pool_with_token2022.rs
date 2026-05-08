@@ -155,25 +155,22 @@ pub fn handle_initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
     params: InitializePoolParameters,
 ) -> Result<()> {
     // --- Step 5: Verify backend-signed LaunchAuth ---
-    #[cfg(not(feature = "skip-launch-auth"))]
-    {
-        let launch_auth: LaunchAuth = verify_authority_sig(
-            &ctx.accounts.instructions_sysvar,
-            &ctx.accounts.ipworld_state,
-        )?;
-        require!(
-            launch_auth.creator == ctx.accounts.creator.key(),
-            PoolError::UnauthorizedLaunch
-        );
-        require!(
-            launch_auth.config == ctx.accounts.config.key(),
-            PoolError::UnauthorizedLaunch
-        );
-        require!(
-            launch_auth.pool_pda == ctx.accounts.pool.key(),
-            PoolError::UnauthorizedLaunch
-        );
-    }
+    let launch_auth: LaunchAuth = verify_authority_sig(
+        &ctx.accounts.instructions_sysvar,
+        &ctx.accounts.ipworld_state,
+    )?;
+    require!(
+        launch_auth.creator == ctx.accounts.creator.key(),
+        PoolError::UnauthorizedLaunch
+    );
+    require!(
+        launch_auth.config == ctx.accounts.config.key(),
+        PoolError::UnauthorizedLaunch
+    );
+    require!(
+        launch_auth.pool_pda == ctx.accounts.pool.key(),
+        PoolError::UnauthorizedLaunch
+    );
 
     let config = ctx.accounts.config.load()?;
 
@@ -360,7 +357,8 @@ pub fn handle_initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
         token_mint_authority,
     )?;
 
-    // charge pool creation fee
+    // TODO: Transfer directly to treasury instead of pool account
+    // Currently kept as-is; claim instructions removed in A-04
     if config.pool_creation_fee > 0 {
         transfer_lamports_from_user(
             ctx.accounts.payer.to_account_info(),

@@ -17,16 +17,18 @@ import {
   transferCreator,
 } from "./instructions";
 import {
-  createMeteoraMetadata,
-  lockLpForPartnerDamm,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
-} from "./instructions/meteoraMigration";
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
 import {
-  createDammConfig,
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
+  DammV2OperatorPermission,
   derivePoolAuthority,
   designCurve,
+  encodePermissions,
   generateAndFund,
   startSvm,
   U64_MAX,
@@ -35,6 +37,11 @@ import { getConfig, getVirtualPool } from "./utils/fetcher";
 import { createToken, mintSplTokenTo } from "./utils/token";
 import { VirtualCurveProgram } from "./utils/types";
 
+// SPEC-DBC-004 Phase 3 (REQ-I-001): the inline `claim_creator_trading_fee`
+// step inside each `fullFlowUpdateCreator*` helper has been removed because
+// the on-chain ix it called was deleted. The remaining flow (transferCreator
+// + swap + creatorWithdrawSurplus) still exercises the meaningful integration
+// surface for the "Update creator" suite.
 describe("Update creator", () => {
   let svm: LiteSVM;
   let admin: Keypair;
@@ -54,13 +61,19 @@ describe("Update creator", () => {
     poolCreator = generateAndFund(svm);
     newPoolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
+
+    await createDammV2Operator(svm, {
+      whitelistAddress: admin.publicKey,
+      admin,
+      permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+    });
   });
 
   it("transfer new creator pre-bonding curve claim fee and surplus", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
-    let migrationOption = 0;
+    let migrationOption = 1;
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let lockedVesting = {
@@ -90,7 +103,6 @@ describe("Update creator", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -124,7 +136,7 @@ describe("Update creator", () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
-    let migrationOption = 0;
+    let migrationOption = 1;
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let lockedVesting = {
@@ -154,7 +166,6 @@ describe("Update creator", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -181,7 +192,8 @@ describe("Update creator", () => {
       poolCreator,
       newPoolCreator,
       user,
-      quoteMint
+      quoteMint,
+      partner
     );
   });
 });
@@ -244,14 +256,8 @@ async function fullFlowUpdateCreatorInPreBondingCurve(
   };
   await swap(svm, program, params);
 
-  // creator claim trading fee
-  const claimTradingFeeParams: ClaimCreatorTradeFeeParams = {
-    creator: newCreator,
-    pool: virtualPool,
-    maxBaseAmount: new BN(U64_MAX),
-    maxQuoteAmount: new BN(U64_MAX),
-  };
-  await claimCreatorTradingFee(svm, program, claimTradingFeeParams);
+  // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed.
+  // Creator earnings now flow exclusively through `creator_withdraw_surplus`.
 
   // creator withdraw surplus
   await creatorWithdrawSurplus(svm, program, {
@@ -268,7 +274,8 @@ async function fullFlowUpdateCreatorPoolCreated(
   poolCreator: Keypair,
   newCreator: Keypair,
   user: Keypair,
-  quoteMint: PublicKey
+  quoteMint: PublicKey,
+  partner: Keypair
 ) {
   // create pool
   let virtualPool = await createPoolWithSplToken(svm, program, {
@@ -311,13 +318,8 @@ async function fullFlowUpdateCreatorPoolCreated(
 
   // migrate
   const poolAuthority = derivePoolAuthority();
-  let dammConfig = await createDammConfig(svm, admin, poolAuthority);
-  const migrationParams: MigrateMeteoraParams = {
-    payer: admin,
-    virtualPool,
-    dammConfig,
-  };
-  await createMeteoraMetadata(svm, program, {
+  const dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+  await createMeteoraDammV2Metadata(svm, program, {
     payer: admin,
     virtualPool,
     config,
@@ -329,17 +331,14 @@ async function fullFlowUpdateCreatorPoolCreated(
       virtualPool,
     });
   }
-  await migrateToMeteoraDamm(svm, program, migrationParams);
-
-  await lockLpForPartnerDamm(svm, program, {
-    payer: admin,
-    dammConfig,
+  const migrationParams: MigrateMeteoraDammV2Params = {
+    payer: partner,
     virtualPool,
-  });
+    dammConfig,
+  };
+  await migrateToDammV2(svm, program, migrationParams);
 
   virtualPoolState = getVirtualPool(svm, program, virtualPool);
-
-  expect(virtualPoolState.migrationProgress).eq(3);
 
   await transferCreator(
     svm,
@@ -349,14 +348,8 @@ async function fullFlowUpdateCreatorPoolCreated(
     newCreator.publicKey
   );
 
-  //  new creator claim trading fee
-  const claimTradingFeeParams: ClaimCreatorTradeFeeParams = {
-    creator: newCreator,
-    pool: virtualPool,
-    maxBaseAmount: new BN(U64_MAX),
-    maxQuoteAmount: new BN(U64_MAX),
-  };
-  await claimCreatorTradingFee(svm, program, claimTradingFeeParams);
+  // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed.
+  // The new creator path now relies solely on `creator_withdraw_surplus`.
 
   //  new creator withdraw surplus
   await creatorWithdrawSurplus(svm, program, {

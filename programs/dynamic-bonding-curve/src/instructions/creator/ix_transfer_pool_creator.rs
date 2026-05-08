@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::{
     state::{MigrationOption, MigrationProgress, PoolConfig, VirtualPool},
-    EvtUpdatePoolCreator, MeteoraDammMigrationMetadata, PoolError,
+    EvtUpdatePoolCreator, PoolError,
 };
 
 /// Accounts for transfer pool creator
@@ -40,47 +40,18 @@ pub fn handle_transfer_pool_creator<'c: 'info, 'info>(
         MigrationProgress::CreatedPool => {
             let migration_option = MigrationOption::try_from(config.migration_option)
                 .map_err(|_| PoolError::InvalidMigrationOption)?;
-            if migration_option == MigrationOption::MeteoraDamm {
-                // Can only transfer pool creator after liquidity token claimed + locked
-                let migration_metadata_account = ctx
-                    .remaining_accounts
-                    .get(0)
-                    .ok_or_else(|| PoolError::InvalidAccount)?;
-                let migration_metadata_loader: AccountLoader<'_, MeteoraDammMigrationMetadata> =
-                    AccountLoader::try_from(migration_metadata_account)?;
-                let migration_metadata = migration_metadata_loader.load()?;
-
-                require!(
-                    migration_metadata.virtual_pool == ctx.accounts.virtual_pool.key(),
-                    PoolError::InvalidAccount
-                );
-
-                require!(
-                    migration_metadata.partner_locked_liquidity == 0
-                        || migration_metadata.is_partner_liquidity_locked(),
-                    PoolError::NotPermitToDoThisAction
-                );
-
-                require!(
-                    migration_metadata.creator_locked_liquidity == 0
-                        || migration_metadata.is_creator_liquidity_locked(),
-                    PoolError::NotPermitToDoThisAction
-                );
-
-                require!(
-                    migration_metadata.creator_liquidity == 0
-                        || migration_metadata.is_creator_claim_liquidity(),
-                    PoolError::NotPermitToDoThisAction
-                );
-                require!(
-                    migration_metadata.partner_liquidity == 0
-                        || migration_metadata.is_partner_claim_liquidity(),
-                    PoolError::NotPermitToDoThisAction
-                );
-            }
+            // DAMM v1 (MeteoraDammDisabled) is no longer supported; all pools use DammV2.
+            // DammV2 pools have no LP-token lock requirements here.
+            let _ = migration_option;
         }
         _ => return Err(PoolError::NotPermitToDoThisAction.into()),
     }
+
+    // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_quote_fee` field removed —
+    // creator-side trading fee accumulation eliminated alongside
+    // `creator_share`. Pre-transfer balance check no longer needed; any
+    // unclaimed creator surplus is handled by the existing
+    // `creator_withdraw_surplus` flow before transfer.
 
     pool.creator = ctx.accounts.new_creator.key();
 

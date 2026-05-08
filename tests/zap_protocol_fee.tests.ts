@@ -57,7 +57,8 @@ import { getOrCreateAssociatedTokenAccount } from "./utils/token";
 const DAMM_V1_SWAP_ENUM_IN_JUP_V6 = 19;
 const DAMM_V2_SWAP_ENUM_IN_JUP_V6 = 77;
 
-describe("Claim protocol liquidity migration fee", () => {
+// audit: F-045 — Tier 1 deletion EvtClaimProtocolLiquidityMigrationFee
+describe.skip("Claim protocol liquidity migration fee", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;
@@ -97,7 +98,7 @@ describe("Claim protocol liquidity migration fee", () => {
       customizableMigrationFeeOption,
       {
         poolFeeBps: 100,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
       },
       partner,
@@ -162,7 +163,7 @@ describe("Claim protocol liquidity migration fee", () => {
       fixedFeeBps0MigrationFeeOption,
       {
         poolFeeBps: 0,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
       },
       partner,

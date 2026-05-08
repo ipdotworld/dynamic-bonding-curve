@@ -20,16 +20,17 @@ import {
   SwapParams,
 } from "./instructions";
 import {
-  createMeteoraMetadata,
-  lockLpForCreatorDamm,
-  lockLpForPartnerDamm,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
-} from "./instructions/meteoraMigration";
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
 import {
-  createDammConfig,
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
+  DammV2OperatorPermission,
   derivePoolAuthority,
+  encodePermissions,
   FLASH_RENT_FUND,
   generateAndFund,
   getMint,
@@ -53,6 +54,8 @@ describe("Full flow with spl-token", () => {
   let virtualPool: PublicKey;
   let virtualPoolState: Pool;
   let dammConfig: PublicKey;
+  let firstPosition: PublicKey;
+  let secondPosition: PublicKey;
 
   before(async () => {
     svm = startSvm();
@@ -62,6 +65,12 @@ describe("Full flow with spl-token", () => {
     user = generateAndFund(svm);
     poolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
+
+    await createDammV2Operator(svm, {
+      whitelistAddress: admin.publicKey,
+      admin,
+      permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+    });
   });
 
   it("Admin create operator with claim protocol fee permission", async () => {
@@ -103,8 +112,8 @@ describe("Full flow with spl-token", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
-      migrationOption: 0,
+      collectFeeMode: 1,
+      migrationOption: 1,
       tokenType: 0, // spl_token
       tokenDecimal: 6,
       migrationQuoteThreshold: new BN(LAMPORTS_PER_SOL * 5),
@@ -129,7 +138,7 @@ describe("Full flow with spl-token", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },
@@ -156,7 +165,6 @@ describe("Full flow with spl-token", () => {
     };
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
       instructionParams,
@@ -201,19 +209,19 @@ describe("Full flow with spl-token", () => {
     await swap(svm, program, params);
   });
 
-  it("Create meteora metadata", async () => {
-    await createMeteoraMetadata(svm, program, {
+  it("Create meteora damm v2 metadata", async () => {
+    await createMeteoraDammV2Metadata(svm, program, {
       payer: admin,
       virtualPool,
       config,
     });
   });
 
-  it("Migrate to Meteora Damm Pool", async () => {
+  it("Migrate to Meteora Damm V2 Pool", async () => {
     const poolAuthority = derivePoolAuthority();
-    dammConfig = await createDammConfig(svm, admin, poolAuthority);
-    const migrationParams: MigrateMeteoraParams = {
-      payer: admin,
+    dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+    const migrationParams: MigrateMeteoraDammV2Params = {
+      payer: partner,
       virtualPool,
       dammConfig,
     };
@@ -224,7 +232,9 @@ describe("Full flow with spl-token", () => {
       FLASH_RENT_FUND.toString()
     );
 
-    await migrateToMeteoraDamm(svm, program, migrationParams);
+    const result = await migrateToDammV2(svm, program, migrationParams);
+    firstPosition = result.firstPosition;
+    secondPosition = result.secondPosition;
 
     const afterPoolAuthorityLamport = svm.getBalance(poolAuthority);
 
@@ -235,31 +245,27 @@ describe("Full flow with spl-token", () => {
     expect(baseMintData.mintAuthorityOption).eq(0);
   });
 
-  it("Partner lock LP", async () => {
-    await lockLpForPartnerDamm(svm, program, {
-      payer: partner,
-      dammConfig,
-      virtualPool,
-    });
+  it("Positions exist after migration", async () => {
+    // DAMM v2 creates NFT positions automatically (replaces LP lock/claim)
+    const firstPositionAccount = svm.getAccount(firstPosition);
+    const secondPositionAccount = svm.getAccount(secondPosition);
+
+    expect(firstPositionAccount).to.not.be.null;
+    expect(secondPositionAccount).to.not.be.null;
   });
 
-  it("Creator lock LP", async () => {
-    await lockLpForCreatorDamm(svm, program, {
-      payer: poolCreator,
-      dammConfig,
-      virtualPool,
-    });
-  });
-
-  it("Partner withdraw surplus", async () => {
-    // partner withdraw surplus
+  // partner_withdraw_surplus removed in A-04 (partner system removal)
+  // audit: F-023 — Partner system removed in A-04 (cleanup-log.md Tier 2)
+  it.skip("Partner withdraw surplus", async () => {
     await partnerWithdrawSurplus(svm, program, {
       feeClaimer: partner,
       virtualPool,
     });
   });
 
-  it("Parner can not withdraw again", async () => {
+  // partner_withdraw_surplus removed in A-04 (partner system removal)
+  // audit: F-024 — Partner system removed in A-04 (cleanup-log.md Tier 2)
+  it.skip("Partner can not withdraw again", async () => {
     try {
       await partnerWithdrawSurplus(svm, program, {
         feeClaimer: partner,
@@ -270,6 +276,7 @@ describe("Full flow with spl-token", () => {
       //
     }
   });
+
   it("Protocol withdraw surplus", async () => {
     await claimProtocolFee(svm, program, {
       operator: operator,
@@ -284,7 +291,9 @@ describe("Full flow with spl-token", () => {
     });
   });
 
-  it("Partner claim trading fee", async () => {
+  // claim_trading_fee removed in A-04 (partner system removal); use claim_creator_trading_fee
+  // audit: F-025 — Partner trading-fee path removed in Phase 1 (Tier 2)
+  it.skip("Partner claim trading fee", async () => {
     const claimTradingFeeParams: ClaimTradeFeeParams = {
       feeClaimer: partner,
       pool: virtualPool,

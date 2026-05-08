@@ -24,14 +24,15 @@ import {
 import {
   getConfig,
   getPartnerMetadata,
+  getTokenVerification,
   getVirtualPool,
 } from "../../utils/fetcher";
 import { VirtualCurveProgram } from "../../utils/types";
 import { deriveEventAuthority, readIxData } from "../utils";
+import { deriveTokenVerificationAddress } from "../../utils/accounts";
 
 export type CreateConfigParams = {
   payer: Keypair;
-  leftoverReceiver: PublicKey;
   feeClaimer: PublicKey;
   quoteMint: PublicKey;
   token2022: boolean;
@@ -77,7 +78,6 @@ export async function createPartnerMetadata(
 
 export type createConfigSplTokenWithBaseFeeParametersParams = {
   payer: Keypair;
-  leftoverReceiver: PublicKey;
   feeClaimer: PublicKey;
   quoteMint: PublicKey;
 };
@@ -87,7 +87,7 @@ export async function createConfigSplTokenWithBaseFeeParameters(
   program: VirtualCurveProgram,
   params: createConfigSplTokenWithBaseFeeParametersParams
 ): Promise<PublicKey> {
-  const { payer, leftoverReceiver, feeClaimer, quoteMint } = params;
+  const { payer, feeClaimer, quoteMint } = params;
   const config = Keypair.generate();
   const eventAuthority = deriveEventAuthority(program);
 
@@ -96,7 +96,6 @@ export async function createConfigSplTokenWithBaseFeeParameters(
     keys: [
       { pubkey: config.publicKey, isSigner: true, isWritable: true },
       { pubkey: feeClaimer, isSigner: false, isWritable: false },
-      { pubkey: leftoverReceiver, isSigner: false, isWritable: false },
       { pubkey: NATIVE_MINT, isSigner: false, isWritable: false },
       { pubkey: payer.publicKey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -121,7 +120,7 @@ export async function createConfig(
   program: VirtualCurveProgram,
   params: CreateConfigParams
 ): Promise<PublicKey> {
-  const { payer, leftoverReceiver, feeClaimer, quoteMint } = params;
+  const { payer, feeClaimer, quoteMint } = params;
   const config = Keypair.generate();
   const eventAuthority = deriveEventAuthority(program);
 
@@ -130,7 +129,6 @@ export async function createConfig(
     keys: [
       { pubkey: config.publicKey, isSigner: true, isWritable: true },
       { pubkey: feeClaimer, isSigner: false, isWritable: false },
-      { pubkey: leftoverReceiver, isSigner: false, isWritable: false },
       { pubkey: NATIVE_MINT, isSigner: false, isWritable: false },
       { pubkey: payer.publicKey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -154,7 +152,6 @@ export async function createConfig(
 
 export type CreateConfigForSwapParams = {
   payer: Keypair;
-  leftoverReceiver: PublicKey;
   feeClaimer: PublicKey;
   quoteMint: PublicKey;
 };
@@ -163,7 +160,7 @@ export async function createConfigForSwapDamm(
   program: VirtualCurveProgram,
   params: CreateConfigForSwapParams
 ): Promise<PublicKey> {
-  const { payer, leftoverReceiver, feeClaimer, quoteMint } = params;
+  const { payer, feeClaimer, quoteMint } = params;
   const config = Keypair.generate();
   const eventAuthority = deriveEventAuthority(program);
 
@@ -172,7 +169,6 @@ export async function createConfigForSwapDamm(
     keys: [
       { pubkey: config.publicKey, isSigner: true, isWritable: true },
       { pubkey: feeClaimer, isSigner: false, isWritable: false },
-      { pubkey: leftoverReceiver, isSigner: false, isWritable: false },
       { pubkey: NATIVE_MINT, isSigner: false, isWritable: false },
       { pubkey: payer.publicKey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -197,7 +193,7 @@ export async function createConfigForSwapDammv2(
   program: VirtualCurveProgram,
   params: CreateConfigForSwapParams
 ): Promise<PublicKey> {
-  const { payer, leftoverReceiver, feeClaimer, quoteMint } = params;
+  const { payer, feeClaimer, quoteMint } = params;
   const config = Keypair.generate();
   const eventAuthority = deriveEventAuthority(program);
 
@@ -206,7 +202,6 @@ export async function createConfigForSwapDammv2(
     keys: [
       { pubkey: config.publicKey, isSigner: true, isWritable: true },
       { pubkey: feeClaimer, isSigner: false, isWritable: false },
-      { pubkey: leftoverReceiver, isSigner: false, isWritable: false },
       { pubkey: NATIVE_MINT, isSigner: false, isWritable: false },
       { pubkey: payer.publicKey, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -373,6 +368,11 @@ export async function withdrawLeftover(
   const configState = getConfig(svm, program, poolState.config);
   const poolAuthority = derivePoolAuthority();
 
+  // AC-A08: ip_treasury from TokenVerification PDA replaces leftover_receiver from config
+  const tokenVerificationPDA = deriveTokenVerificationAddress(virtualPool);
+  const tokenVerification = getTokenVerification(svm, program, tokenVerificationPDA);
+  const ipTreasury = tokenVerification.ipTreasury;
+
   const tokenBaseProgram =
     configState.tokenType == 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
 
@@ -383,7 +383,7 @@ export async function withdrawLeftover(
       svm,
       payer,
       poolState.baseMint,
-      configState.leftoverReceiver,
+      ipTreasury,
       tokenBaseProgram
     ),
   ];
@@ -397,14 +397,10 @@ export async function withdrawLeftover(
       { pubkey: poolAuthority, isSigner: false, isWritable: false },
       { pubkey: poolState.config, isSigner: false, isWritable: false },
       { pubkey: virtualPool, isSigner: false, isWritable: true },
+      { pubkey: tokenVerificationPDA, isSigner: false, isWritable: false },
       { pubkey: tokenBaseAccount, isSigner: false, isWritable: true },
       { pubkey: poolState.baseVault, isSigner: false, isWritable: true },
       { pubkey: poolState.baseMint, isSigner: false, isWritable: false },
-      {
-        pubkey: configState.leftoverReceiver,
-        isSigner: false,
-        isWritable: false,
-      },
       { pubkey: tokenBaseProgram, isSigner: false, isWritable: false },
       { pubkey: eventAuthority, isSigner: false, isWritable: false },
       { pubkey: program.programId, isSigner: false, isWritable: false },

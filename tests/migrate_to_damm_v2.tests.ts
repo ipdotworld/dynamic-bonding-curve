@@ -105,7 +105,7 @@ describe("Migrate to damm v2", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1,
       tokenType: 0, // spl_token
       tokenDecimal: 6,
@@ -131,7 +131,7 @@ describe("Migrate to damm v2", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },
@@ -158,7 +158,6 @@ describe("Migrate to damm v2", () => {
     };
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
       instructionParams,
@@ -213,7 +212,7 @@ describe("Migrate to damm v2", () => {
       1 // Timestamp
     );
     const migrationParams: MigrateMeteoraDammV2Params = {
-      payer: admin,
+      payer: partner,
       virtualPool,
       dammConfig,
     };

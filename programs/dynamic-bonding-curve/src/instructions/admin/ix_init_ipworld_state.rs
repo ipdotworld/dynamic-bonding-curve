@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use crate::state::IpworldState;
+use crate::event::EvtIpworldStateInitialized;
 
 #[derive(Accounts)]
 pub struct InitIpworldStateCtx<'info> {
@@ -27,5 +28,9 @@ pub fn handle_init_ipworld_state(
     state.authority = authority;
     state.admin = ctx.accounts.payer.key();
     state.bump = ctx.bumps.ipworld_state;
+    emit!(EvtIpworldStateInitialized {
+        admin: state.admin,
+        authority: state.authority,
+    });
     Ok(())
 }

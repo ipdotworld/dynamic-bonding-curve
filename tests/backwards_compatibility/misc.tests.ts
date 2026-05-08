@@ -44,7 +44,6 @@ describe("Backwards compatibility - misc", () => {
   it("createConfigSplToken", async () => {
     const configSplTokenParams: CreateConfigParams = {
       payer: user,
-      leftoverReceiver: user.publicKey,
       feeClaimer: user.publicKey,
       quoteMint: NATIVE_MINT,
       token2022: false,
@@ -69,7 +68,6 @@ describe("Backwards compatibility - misc", () => {
   it("createConfigToken2022", async () => {
     const configToken2022Params: CreateConfigParams = {
       payer: user,
-      leftoverReceiver: user.publicKey,
       feeClaimer: user.publicKey,
       quoteMint: NATIVE_MINT,
       token2022: true,
@@ -121,7 +119,12 @@ describe("Backwards compatibility - misc", () => {
     await createPartnerMetadata(svm, program, partnerMetadataParams);
   });
 
-  it("claimCreatorTradingFee", async () => {
+  // SPEC-DBC-004 Phase 3 (REQ-I-001): the on-chain `claim_creator_trading_fee`
+  // ix was removed. Pre-recorded fixture (`fixtures/claimCreatorTradingFee.bin`)
+  // can no longer be parsed by the current program; backwards-compat verification
+  // for this surface is intentionally skipped.
+  // audit: F-008 — creator_share removed in Phase 3 (REQ-I-001)
+  it.skip("claimCreatorTradingFee", async () => {
     const partnerMetadataParams = {
       creator: user,
       pool: poolToken2022,

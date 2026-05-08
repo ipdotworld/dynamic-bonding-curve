@@ -1,0 +1,23 @@
+[package]
+name = "ip-owner-vault"
+version = "0.1.0"
+description = "IP owner vesting vault — receives quote fees from DBC and releases linearly to the verified IP owner."
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "ip_owner_vault"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
+anchor-spl = { workspace = true, features = ["token_2022"] }
+bytemuck = { workspace = true, features = ["min_const_generics"] }
+static_assertions = "1.1.0"

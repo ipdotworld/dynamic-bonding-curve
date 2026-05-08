@@ -249,8 +249,9 @@ proptest! {
     ) {
         let migration_percentage = migration_percentage as f64;
         let migration_amount = get_migration_amount(total_supply, migration_percentage);
+        // MeteoraDammDisabled is discriminant 0 but rejected at config creation; use DammV2 for both.
         let migration_option = if migration_option == 0 {
-            MigrationOption::MeteoraDamm
+            MigrationOption::MeteoraDammDisabled
         }else{
             MigrationOption::DammV2
         };

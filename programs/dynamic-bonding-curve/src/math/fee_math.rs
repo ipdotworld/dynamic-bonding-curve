@@ -23,9 +23,10 @@ pub fn get_fee_in_period(
     let base = ONE_Q64.safe_sub(bps)?;
     let result = pow(base, passed_period.into()).ok_or_else(|| PoolError::MathOverflow)?;
 
-    let (fee, _) = result
+    let fee = result
         .safe_mul(cliff_fee_numerator.into())?
-        .overflowing_shr(SCALE_OFFSET);
+        .checked_shr(SCALE_OFFSET as u32)
+        .ok_or(PoolError::MathOverflow)?;
 
     let fee_numerator = u64::try_from(fee).map_err(|_| PoolError::TypeCastFailed)?;
     Ok(fee_numerator)

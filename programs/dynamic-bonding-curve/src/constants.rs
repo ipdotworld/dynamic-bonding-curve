@@ -9,8 +9,6 @@ pub const U24_MAX: u32 = 0xffffff;
 
 pub const ONE_Q64: u128 = 1u128 << 64;
 
-pub const FLASH_RENT_FUND: u64 = 1_000_000_000; // 1 SOL
-
 pub mod dynamic_fee {
 
     pub const BIN_STEP_BPS_DEFAULT: u16 = 1;
@@ -126,4 +124,4 @@ pub mod seeds {
     pub const OPERATOR_PREFIX: &[u8] = b"operator";
 }
 
-pub const MAX_OPERATION: u8 = 2; // Check OperatorPermission enum variants count
+pub const MAX_OPERATION: u8 = 5; // Check OperatorPermission enum variants count (slot 1 = _Reserved1)

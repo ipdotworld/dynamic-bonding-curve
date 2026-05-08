@@ -1,7 +1,5 @@
 import {
-  getAssociatedTokenAddressSync,
   NATIVE_MINT,
-  unpackAccount,
 } from "@solana/spl-token";
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { BN } from "bn.js";
@@ -18,21 +16,17 @@ import {
   SwapParams,
 } from "./instructions";
 import {
-  createMeteoraMetadata,
-  creatorClaimLpDamm,
-  lockLpForCreatorDamm,
-  lockLpForPartnerDamm,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
-  partnerClaimLpDamm,
-} from "./instructions/meteoraMigration";
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
 import {
-  createDammConfig,
-  createDammProgram,
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
-  deriveDammPoolAddress,
-  deriveLpMintAddress,
+  DammV2OperatorPermission,
   derivePoolAuthority,
+  encodePermissions,
   generateAndFund,
   MAX_SQRT_PRICE,
   MIN_SQRT_PRICE,
@@ -40,9 +34,6 @@ import {
   U64_MAX,
 } from "./utils";
 import {
-  getConfig,
-  getLockEscrow,
-  getMeteoraDammMigrationMetadata,
   getVirtualPool,
 } from "./utils/fetcher";
 import { VirtualCurveProgram } from "./utils/types";
@@ -84,8 +75,8 @@ async function createPartnerConfig(
       dynamicFee: null,
     },
     activationType: 0,
-    collectFeeMode: 0,
-    migrationOption: 0,
+    collectFeeMode: 1,
+    migrationOption: 1,
     tokenType: 0, // spl_token
     tokenDecimal: 6,
     migrationQuoteThreshold: new BN(LAMPORTS_PER_SOL * 5),
@@ -110,7 +101,7 @@ async function createPartnerConfig(
       creatorFeePercentage: 0,
     },
     migratedPoolFee: {
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       dynamicFee: 0,
       poolFeeBps: 0,
     },
@@ -137,7 +128,6 @@ async function createPartnerConfig(
   };
   const params: CreateConfigParams<ConfigParameters> = {
     payer,
-    leftoverReceiver: owner,
     feeClaimer,
     quoteMint: NATIVE_MINT,
     instructionParams,
@@ -152,11 +142,13 @@ async function setupPrerequisite(
   poolCreator: Keypair,
   swapInitiator: Keypair,
   admin: Keypair,
+  partner: Keypair,
   config: PublicKey
 ): Promise<{
   virtualPool: PublicKey;
   dammConfig: PublicKey;
-  migrationMetadata: PublicKey;
+  firstPosition: PublicKey;
+  secondPosition: PublicKey;
 }> {
   const virtualPool = await createPoolWithSplToken(svm, program, {
     payer,
@@ -186,26 +178,27 @@ async function setupPrerequisite(
 
   await swap(svm, program, params);
 
-  const migrationMetadata = await createMeteoraMetadata(svm, program, {
+  await createMeteoraDammV2Metadata(svm, program, {
     payer: admin,
     virtualPool,
     config,
   });
 
   const poolAuthority = derivePoolAuthority();
-  const dammConfig = await createDammConfig(svm, admin, poolAuthority);
-  const migrationParams: MigrateMeteoraParams = {
-    payer: admin,
+  const dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+  const migrationParams: MigrateMeteoraDammV2Params = {
+    payer: partner,
     virtualPool,
     dammConfig,
   };
 
-  await migrateToMeteoraDamm(svm, program, migrationParams);
+  const result = await migrateToDammV2(svm, program, migrationParams);
 
   return {
     virtualPool,
     dammConfig,
-    migrationMetadata,
+    firstPosition: result.firstPosition,
+    secondPosition: result.secondPosition,
   };
 }
 
@@ -249,7 +242,8 @@ describe("Claim and lock lp on meteora dammm", () => {
   let config: PublicKey;
   let virtualPool: PublicKey;
   let dammConfig: PublicKey;
-  let migrationMetadata: PublicKey;
+  let firstPosition: PublicKey;
+  let secondPosition: PublicKey;
 
   describe("Self partnered creator", () => {
     before(async () => {
@@ -271,6 +265,12 @@ describe("Claim and lock lp on meteora dammm", () => {
       poolCreator = innerPoolCreator;
       program = innerProgram;
 
+      await createDammV2Operator(svm, {
+        whitelistAddress: admin.publicKey,
+        admin,
+        permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+      });
+
       config = await createPartnerConfig(
         admin,
         poolCreator.publicKey,
@@ -279,121 +279,36 @@ describe("Claim and lock lp on meteora dammm", () => {
         program
       );
 
-      const {
-        dammConfig: innerDammConfig,
-        virtualPool: innerVirtualPool,
-        migrationMetadata: innerMigrationMetadata,
-      } = await setupPrerequisite(
+      const result = await setupPrerequisite(
         svm,
         program,
         admin,
         poolCreator,
         user,
         admin,
+        poolCreator, // self-partnered: poolCreator is feeClaimer
         config
       );
 
-      dammConfig = innerDammConfig;
-      virtualPool = innerVirtualPool;
-      migrationMetadata = innerMigrationMetadata;
+      dammConfig = result.dammConfig;
+      virtualPool = result.virtualPool;
+      firstPosition = result.firstPosition;
+      secondPosition = result.secondPosition;
     });
 
-    it("Self partnered creator lock LP", async () => {
-      const beforeMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
+    it("Self partnered creator: both positions created after migration", async () => {
+      // DAMM v2 automatically creates positions (no separate LP lock/claim needed)
+      // For self-partnered creator, both firstPosition and secondPosition are created
+      const firstPositionAccount = svm.getAccount(firstPosition);
+      const secondPositionAccount = svm.getAccount(secondPosition);
 
-      const lockEscrowKey = await lockLpForPartnerDamm(svm, program, {
-        payer: partner, // Partner or creator it's fine
-        dammConfig,
-        virtualPool,
-      });
-
-      const afterMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      expect(beforeMigrationMetadata.creatorLockedStatus).equal(Number(false));
-      expect(beforeMigrationMetadata.partnerLockedStatus).equal(Number(false));
-
-      expect(afterMigrationMetadata.creatorLockedStatus).equal(Number(true));
-      expect(afterMigrationMetadata.partnerLockedStatus).equal(Number(true));
-
-      const lockEscrowState = getLockEscrow(
-        svm,
-        createDammProgram(),
-        lockEscrowKey
-      );
-
-      const expectedTotalLockLp =
-        beforeMigrationMetadata.creatorLockedLiquidity.add(
-          beforeMigrationMetadata.partnerLockedLiquidity
-        );
-
-      const totalLockLp = lockEscrowState.totalLockedAmount;
-
-      expect(expectedTotalLockLp.toString()).equal(totalLockLp.toString());
+      expect(firstPositionAccount).to.not.be.null;
+      expect(secondPositionAccount).to.not.be.null;
     });
 
-    it("Self partnered creator claim LP", async () => {
-      const configState = getConfig(svm, program, config);
-
-      const virtualPoolState = getVirtualPool(svm, program, virtualPool);
-
-      const dammPool = deriveDammPoolAddress(
-        dammConfig,
-        virtualPoolState.baseMint,
-        configState.quoteMint
-      );
-
-      const lpMint = deriveLpMintAddress(dammPool);
-      const creatorLpAta = getAssociatedTokenAddressSync(
-        lpMint,
-        poolCreator.publicKey
-      );
-
-      const beforeMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      await creatorClaimLpDamm(svm, program, {
-        payer: poolCreator,
-        dammConfig,
-        virtualPool,
-      });
-
-      const afterMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      const creatorLpTokenAccount = svm.getAccount(creatorLpAta);
-
-      const creatorLpTokenState = unpackAccount(
-        creatorLpAta,
-        creatorLpTokenAccount as any // TODO: find a better way
-      );
-
-      expect(beforeMigrationMetadata.creatorClaimStatus).equal(Number(false));
-      expect(beforeMigrationMetadata.partnerClaimStatus).equal(Number(false));
-
-      expect(afterMigrationMetadata.creatorClaimStatus).equal(Number(true));
-      expect(afterMigrationMetadata.partnerClaimStatus).equal(Number(true));
-
-      const expectedLpToClaim = beforeMigrationMetadata.creatorLiquidity.add(
-        beforeMigrationMetadata.partnerLiquidity
-      );
-
-      expect(expectedLpToClaim.toString()).equal(
-        creatorLpTokenState.amount.toString()
-      );
+    it("Self partnered creator: virtual pool migration completed", async () => {
+      const poolState = getVirtualPool(svm, program, virtualPool);
+      expect(poolState.migrationProgress).to.be.greaterThan(0);
     });
   });
 
@@ -417,6 +332,12 @@ describe("Claim and lock lp on meteora dammm", () => {
       svm = innerSvm;
       admin = innerAdmin;
 
+      await createDammV2Operator(svm, {
+        whitelistAddress: admin.publicKey,
+        admin,
+        permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+      });
+
       config = await createPartnerConfig(
         admin,
         poolCreator.publicKey,
@@ -425,213 +346,36 @@ describe("Claim and lock lp on meteora dammm", () => {
         program
       );
 
-      const {
-        dammConfig: innerDammConfig,
-        virtualPool: innerVirtualPool,
-        migrationMetadata: innerMigrationMetadata,
-      } = await setupPrerequisite(
+      const result = await setupPrerequisite(
         svm,
         program,
         operator,
         poolCreator,
         user,
         admin,
+        partner,
         config
       );
 
-      dammConfig = innerDammConfig;
-      virtualPool = innerVirtualPool;
-      migrationMetadata = innerMigrationMetadata;
+      dammConfig = result.dammConfig;
+      virtualPool = result.virtualPool;
+      firstPosition = result.firstPosition;
+      secondPosition = result.secondPosition;
     });
 
-    it("Creator lock LP", async () => {
-      const beforeMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      const lockEscrowKey = await lockLpForCreatorDamm(svm, program, {
-        payer: poolCreator,
-        dammConfig,
-        virtualPool,
-      });
-
-      const afterMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      expect(beforeMigrationMetadata.creatorLockedStatus).equal(Number(false));
-      expect(afterMigrationMetadata.creatorLockedStatus).equal(Number(true));
-
-      expect(beforeMigrationMetadata.partnerLockedStatus).equals(
-        afterMigrationMetadata.partnerLockedStatus
-      );
-
-      const lockEscrowState = getLockEscrow(
-        svm,
-        createDammProgram(),
-        lockEscrowKey
-      );
-
-      const expectedTotalLockLp =
-        beforeMigrationMetadata.creatorLockedLiquidity;
-      const totalLockLp = lockEscrowState.totalLockedAmount;
-
-      expect(expectedTotalLockLp.toString()).equal(totalLockLp.toString());
+    it("Separated partner/creator: first position created after migration", async () => {
+      const firstPositionAccount = svm.getAccount(firstPosition);
+      expect(firstPositionAccount).to.not.be.null;
     });
 
-    it("Partner lock LP", async () => {
-      const beforeMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      const lockEscrowKey = await lockLpForPartnerDamm(svm, program, {
-        payer: partner,
-        dammConfig,
-        virtualPool,
-      });
-
-      const afterMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      expect(beforeMigrationMetadata.partnerLockedStatus).equal(Number(false));
-      expect(afterMigrationMetadata.partnerLockedStatus).equal(Number(true));
-
-      expect(beforeMigrationMetadata.creatorLockedStatus).equals(
-        afterMigrationMetadata.creatorLockedStatus
-      );
-
-      const lockEscrowState = getLockEscrow(
-        svm,
-        createDammProgram(),
-        lockEscrowKey
-      );
-
-      const expectedTotalLockLp =
-        beforeMigrationMetadata.partnerLockedLiquidity;
-      const totalLockLp = lockEscrowState.totalLockedAmount;
-
-      expect(expectedTotalLockLp.toString()).equal(totalLockLp.toString());
+    it("Separated partner/creator: second position created after migration", async () => {
+      const secondPositionAccount = svm.getAccount(secondPosition);
+      expect(secondPositionAccount).to.not.be.null;
     });
 
-    it("Creator claim LP", async () => {
-      const configState = getConfig(svm, program, config);
-
-      const virtualPoolState = getVirtualPool(svm, program, virtualPool);
-
-      const dammPool = deriveDammPoolAddress(
-        dammConfig,
-        virtualPoolState.baseMint,
-        configState.quoteMint
-      );
-
-      const lpMint = deriveLpMintAddress(dammPool);
-      const creatorLpAta = getAssociatedTokenAddressSync(
-        lpMint,
-        poolCreator.publicKey
-      );
-
-      const beforeMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      await creatorClaimLpDamm(svm, program, {
-        payer: poolCreator,
-        dammConfig,
-        virtualPool,
-      });
-
-      const afterMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      const creatorLpTokenAccount = svm.getAccount(creatorLpAta);
-
-      const creatorLpTokenState = unpackAccount(
-        creatorLpAta,
-        creatorLpTokenAccount as any // TODO: find a better way
-      );
-
-      expect(beforeMigrationMetadata.creatorClaimStatus).equal(Number(false));
-      expect(afterMigrationMetadata.creatorClaimStatus).equal(Number(true));
-
-      expect(beforeMigrationMetadata.partnerClaimStatus).equal(
-        afterMigrationMetadata.partnerClaimStatus
-      );
-
-      const expectedLpToClaim = beforeMigrationMetadata.creatorLiquidity;
-
-      expect(expectedLpToClaim.toString()).equal(
-        creatorLpTokenState.amount.toString()
-      );
-    });
-
-    it("Partner claim LP", async () => {
-      const configState = getConfig(svm, program, config);
-
-      const virtualPoolState = getVirtualPool(svm, program, virtualPool);
-
-      const dammPool = deriveDammPoolAddress(
-        dammConfig,
-        virtualPoolState.baseMint,
-        configState.quoteMint
-      );
-
-      const lpMint = deriveLpMintAddress(dammPool);
-      const partnerLpAta = getAssociatedTokenAddressSync(
-        lpMint,
-        partner.publicKey
-      );
-
-      const beforeMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      await partnerClaimLpDamm(svm, program, {
-        payer: partner,
-        dammConfig,
-        virtualPool,
-      });
-
-      const afterMigrationMetadata = getMeteoraDammMigrationMetadata(
-        svm,
-        program,
-        migrationMetadata
-      );
-
-      const partnerLpTokenAccount = svm.getAccount(partnerLpAta);
-
-      const partnerLpTokenState = unpackAccount(
-        partnerLpAta,
-        partnerLpTokenAccount as any // TODO: find a better way
-      );
-
-      expect(beforeMigrationMetadata.partnerClaimStatus).equal(Number(false));
-      expect(afterMigrationMetadata.partnerClaimStatus).equal(Number(true));
-
-      expect(beforeMigrationMetadata.creatorClaimStatus).equal(
-        afterMigrationMetadata.creatorClaimStatus
-      );
-
-      const expectedLpToClaim = beforeMigrationMetadata.partnerLiquidity;
-
-      expect(expectedLpToClaim.toString()).equal(
-        partnerLpTokenState.amount.toString()
-      );
+    it("Separated partner/creator: virtual pool migration completed", async () => {
+      const poolState = getVirtualPool(svm, program, virtualPool);
+      expect(poolState.migrationProgress).to.be.greaterThan(0);
     });
   });
 });

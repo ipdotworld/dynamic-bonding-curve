@@ -63,7 +63,7 @@ describe("Create config", () => {
         dynamicFee: null,
       },
       activationType: 0,
-      collectFeeMode: 0,
+      collectFeeMode: 1,
       migrationOption: 1, // damm v2
       tokenType: 1, // token 2022
       tokenDecimal: 6,
@@ -89,7 +89,7 @@ describe("Create config", () => {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
         poolFeeBps: 0,
       },
@@ -113,13 +113,16 @@ describe("Create config", () => {
       enableFirstSwapWithMinFee: false,
       compoundingFeeBps: 0,
       curve: curves,
+      ipOwnerShare: 50000,
+      airdropShare: 30000,
+      referralShare: 20000,
+      tokenAirdropShare: 50000,
     };
   });
 
   it("create config", async () => {
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
       instructionParams,
@@ -140,15 +143,15 @@ describe("Create config", () => {
     instructionParams.poolFees.baseFee = baseFee;
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
       instructionParams,
     };
 
-    const errorCode = getDbcProgramErrorCodeHexString("ExceedMaxFeeBps");
+    // PoolError::ExceedMaxFeeBps = 6003 = 0x1773
+    // Note: IDL only contains IpworldAuthError; PoolError codes use hardcoded hex
     await expectThrowsAsync(async () => {
       await createConfig(svm, program, params);
-    }, errorCode);
+    }, "0x1773");
   });
 });

@@ -1,0 +1,22 @@
+{
+  "all": true,
+  "include": [
+    "tests/fork/scenario-*.tests.ts",
+    "tests/*.tests.ts"
+  ],
+  "exclude": [
+    "tests/fork/utils/**",
+    "tests/utils/**",
+    "tests/instructions/**",
+    "tests/backwards_compatibility/**",
+    "tests/fixtures/**"
+  ],
+  "extension": [".ts"],
+  "reporter": ["json-summary", "text-summary"],
+  "report-dir": "../.moai/specs/SPEC-DBC-004/nyc-output",
+  "temp-dir": "../.moai/specs/SPEC-DBC-004/.nyc_output",
+  "critical": [
+    "tests/fork/scenario-*.tests.ts"
+  ],
+  "comment": "report-dir is relative to the sub-repo root; the SPEC dir lives in the parent (control-tower) directory."
+}

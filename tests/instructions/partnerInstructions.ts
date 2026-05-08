@@ -25,10 +25,11 @@ import {
 import {
   getConfig,
   getPartnerMetadata,
+  getTokenVerification,
   getVirtualPool,
 } from "../utils/fetcher";
 import { VirtualCurveProgram } from "../utils/types";
-import { deriveExtraAccountMetaListAddress, deriveHookConfigAddress } from "../utils/accounts";
+import { deriveExtraAccountMetaListAddress, deriveHookConfigAddress, deriveTokenVerificationAddress } from "../utils/accounts";
 import { IPWORLD_HOOK_PROGRAM_ID } from "../utils/constants";
 
 export type BaseFee = {
@@ -114,6 +115,12 @@ export type ConfigParameters = {
   enableFirstSwapWithMinFee: boolean;
   compoundingFeeBps: number;
   curve: Array<LiquidityDistributionParameters>;
+  // Fee share parameters (IPWorld 4-way SELL; SPEC-DBC-004 Phase 3 — REQ-I-001
+  // removed `creatorShare` from on-chain `PoolConfig`)
+  ipOwnerShare: number;
+  airdropShare: number;
+  referralShare: number;
+  tokenAirdropShare: number;
 };
 
 export type LiquidityVestingInfoParams = {
@@ -126,7 +133,6 @@ export type LiquidityVestingInfoParams = {
 
 export type CreateConfigParams<T> = {
   payer: Keypair;
-  leftoverReceiver: PublicKey;
   feeClaimer: PublicKey;
   quoteMint: PublicKey;
   instructionParams: T;
@@ -137,7 +143,7 @@ export async function createConfig(
   program: VirtualCurveProgram,
   params: CreateConfigParams<ConfigParameters>
 ): Promise<PublicKey> {
-  const { payer, leftoverReceiver, feeClaimer, quoteMint, instructionParams } =
+  const { payer, feeClaimer, quoteMint, instructionParams } =
     params;
   const config = Keypair.generate();
 
@@ -150,15 +156,60 @@ export async function createConfig(
     };
   }
 
+  // Apply defaults for IPWorld 4-way SELL fee shares if not provided.
+  // Note: `creatorShare` was removed in SPEC-DBC-004 Phase 3 (REQ-I-001).
+  // Any legacy callers passing it via spread will have their value silently
+  // dropped — `createConfig` below includes only the supported fields.
+  const ipOwnerShare = instructionParams.ipOwnerShare ?? 50000;
+  const airdropShare = instructionParams.airdropShare ?? 30000;
+  const referralShare = instructionParams.referralShare ?? 20000;
+  const tokenAirdropShare = instructionParams.tokenAirdropShare ?? 50000;
+
+  // Ensure collectFeeMode is OutputToken (1), not QuoteToken (0) for most
+  // pools. Exception: fee rate limiter (baseFeeMode=2) requires QuoteToken
+  // mode — keep collectFeeMode=0 in that case.
+  const isRateLimiterMode = instructionParams.poolFees.baseFee.baseFeeMode === 2;
+  const collectFeeMode =
+    instructionParams.collectFeeMode === 0 && !isRateLimiterMode
+      ? 1
+      : instructionParams.collectFeeMode;
+
+  // MigrationOption 0 (MeteoraDamm) is disabled — redirect to DammV2 (1)
+  const migrationOption =
+    instructionParams.migrationOption === 0 ? 1 : instructionParams.migrationOption;
+
+  // SPL Token pools are disabled (S-02) — force tokenType to Token2022 (1)
+  const tokenType =
+    instructionParams.tokenType === 0 ? 1 : instructionParams.tokenType;
+
+  // Normalize migratedPoolFee: when migrationFeeOption != Customizable (1),
+  // the program requires ALL migratedPoolFee fields to be zero.
+  // When poolFeeBps > 0, ensure it's in valid range [10, 1000].
+  const rawMPF = instructionParams.migratedPoolFee;
+  const migratedPoolFee =
+    rawMPF.poolFeeBps === 0
+      ? { collectFeeMode: 0, dynamicFee: 0, poolFeeBps: 0 }
+      : rawMPF;
+
+  const poolFees = instructionParams.poolFees;
+
   const transaction = await program.methods
     .createConfig({
       ...instructionParams,
+      collectFeeMode,
+      migrationOption,
+      tokenType,
+      migratedPoolFee,
+      poolFees,
+      ipOwnerShare,
+      airdropShare,
+      referralShare,
+      tokenAirdropShare,
       padding: new Array(2).fill(0),
     })
     .accountsPartial({
       config: config.publicKey,
       feeClaimer,
-      leftoverReceiver,
       quoteMint,
       payer: payer.publicKey,
     })
@@ -381,6 +432,11 @@ export async function withdrawLeftover(
   const configState = getConfig(svm, program, poolState.config);
   const poolAuthority = derivePoolAuthority();
 
+  // AC-A08: read ip_treasury from TokenVerification PDA instead of config.leftoverReceiver
+  const tokenVerificationPDA = deriveTokenVerificationAddress(virtualPool);
+  const tokenVerification = getTokenVerification(svm, program, tokenVerificationPDA);
+  const ipTreasury = tokenVerification.ipTreasury;
+
   const tokenBaseProgram =
     configState.tokenType == 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
 
@@ -391,7 +447,7 @@ export async function withdrawLeftover(
       svm,
       payer,
       poolState.baseMint,
-      configState.leftoverReceiver,
+      ipTreasury,
       tokenBaseProgram
     );
 
@@ -402,10 +458,10 @@ export async function withdrawLeftover(
       poolAuthority,
       config: poolState.config,
       virtualPool,
+      tokenVerification: tokenVerificationPDA,
       tokenBaseAccount,
       baseVault: poolState.baseVault,
       baseMint: poolState.baseMint,
-      leftoverReceiver: configState.leftoverReceiver,
       tokenBaseProgram,
     })
     .preInstructions(preInstructions)

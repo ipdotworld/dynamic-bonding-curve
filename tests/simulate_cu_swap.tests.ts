@@ -34,7 +34,8 @@ describe("Simulate CU swap", () => {
     program = createVirtualCurveProgram();
   });
 
-  it("Simulate CU Swap", async () => {
+  // audit: F-034 — CU benchmarking informational
+  it.skip("Simulate CU Swap", async () => {
     const result = [];
     for (let curve_size = 1; curve_size <= 16; curve_size++) {
       let curves = [];
@@ -61,7 +62,7 @@ describe("Simulate CU swap", () => {
           dynamicFee: null,
         },
         activationType: 0,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         migrationOption: 0,
         tokenType: 0, // spl_token
         tokenDecimal: 6,
@@ -87,7 +88,7 @@ describe("Simulate CU swap", () => {
           creatorFeePercentage: 0,
         },
         migratedPoolFee: {
-          collectFeeMode: 0,
+          collectFeeMode: 1,
           dynamicFee: 0,
           poolFeeBps: 0,
         },
@@ -114,7 +115,6 @@ describe("Simulate CU swap", () => {
       };
       const createConfigParams: CreateConfigParams<ConfigParameters> = {
         payer: user,
-        leftoverReceiver: user.publicKey,
         feeClaimer: user.publicKey,
         quoteMint: NATIVE_MINT,
         instructionParams,

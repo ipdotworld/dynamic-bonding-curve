@@ -137,10 +137,15 @@ pub struct InitializeVirtualPoolWithSplTokenCtx<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[allow(unreachable_code, unused_variables)]
 pub fn handle_initialize_virtual_pool_with_spl_token<'c: 'info, 'info>(
     ctx: Context<'_, '_, 'c, 'info, InitializeVirtualPoolWithSplTokenCtx<'info>>,
     params: InitializePoolParameters,
 ) -> Result<()> {
+    // SPL Token pools are disabled. IPWorld uses Token-2022 exclusively
+    // for transfer hook enforcement (P2P transfer blocking).
+    return Err(PoolError::InvalidTokenType.into());
+
     let config = ctx.accounts.config.load()?;
 
     require!(

@@ -9,6 +9,8 @@ export type VirtualCurveProgram = Program<DynamicBondingCurve>;
 
 export type Pool = IdlAccounts<DynamicBondingCurve>["virtualPool"];
 export type PoolConfig = IdlAccounts<DynamicBondingCurve>["poolConfig"];
+export type TokenVerification =
+  IdlAccounts<DynamicBondingCurve>["tokenVerification"];
 export type PartnerMetadata =
   IdlAccounts<DynamicBondingCurve>["partnerMetadata"];
 export type VirtualPoolMetadata =

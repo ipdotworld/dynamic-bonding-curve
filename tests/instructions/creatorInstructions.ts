@@ -17,6 +17,8 @@ import {
 } from "../utils";
 import { getConfig, getVirtualPool } from "../utils/fetcher";
 import { VirtualCurveProgram } from "../utils/types";
+import { deriveExtraAccountMetaListAddress, deriveHookConfigAddress } from "../utils/accounts";
+import { IPWORLD_HOOK_PROGRAM_ID } from "../utils/constants";
 
 export type ClaimCreatorTradeFeeParams = {
   creator: Keypair;
@@ -24,73 +26,22 @@ export type ClaimCreatorTradeFeeParams = {
   maxBaseAmount: BN;
   maxQuoteAmount: BN;
 };
+
+// SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` instruction
+// was removed alongside `creator_share` / `creator_quote_fee` /
+// `_deprecated_creator_base_fee`. The helper export is retained as a stub
+// (throwing on call) so consuming test files (all `describe.skip`-ed) still
+// import successfully; any accidental live invocation surfaces a clear error
+// instead of silently passing.
 export async function claimCreatorTradingFee(
-  svm: LiteSVM,
-  program: VirtualCurveProgram,
-  params: ClaimCreatorTradeFeeParams
+  _svm: LiteSVM,
+  _program: VirtualCurveProgram,
+  _params: ClaimCreatorTradeFeeParams
 ): Promise<any> {
-  const { creator, pool, maxBaseAmount, maxQuoteAmount } = params;
-  const poolState = getVirtualPool(svm, program, pool);
-  const configState = getConfig(svm, program, poolState.config);
-  const poolAuthority = derivePoolAuthority();
-
-  const quoteMintInfo = getTokenAccount(svm, poolState.quoteVault)!;
-
-  const tokenBaseProgram =
-    configState.tokenType == 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
-
-  const tokenQuoteProgram =
-    configState.quoteTokenFlag == 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
-
-  const preInstructions: TransactionInstruction[] = [];
-  const postInstructions: TransactionInstruction[] = [];
-  const [
-    { ata: baseTokenAccount, ix: createBaseTokenAccountIx },
-    { ata: quoteTokenAccount, ix: createQuoteTokenAccountIx },
-  ] = [
-      getOrCreateAssociatedTokenAccount(
-        svm,
-        creator,
-        poolState.baseMint,
-        creator.publicKey,
-        tokenBaseProgram
-      ),
-      getOrCreateAssociatedTokenAccount(
-        svm,
-        creator,
-        quoteMintInfo.mint,
-        creator.publicKey,
-        tokenQuoteProgram
-      ),
-    ];
-  createBaseTokenAccountIx && preInstructions.push(createBaseTokenAccountIx);
-  createQuoteTokenAccountIx && preInstructions.push(createQuoteTokenAccountIx);
-
-  if (configState.quoteMint == NATIVE_MINT) {
-    const unrapSOLIx = unwrapSOLInstruction(creator.publicKey);
-    unrapSOLIx && postInstructions.push(unrapSOLIx);
-  }
-
-  const transaction = await program.methods
-    .claimCreatorTradingFee(maxBaseAmount, maxQuoteAmount)
-    .accountsPartial({
-      poolAuthority,
-      pool,
-      tokenAAccount: baseTokenAccount,
-      tokenBAccount: quoteTokenAccount,
-      baseVault: poolState.baseVault,
-      quoteVault: poolState.quoteVault,
-      baseMint: poolState.baseMint,
-      quoteMint: quoteMintInfo.mint,
-      creator: creator.publicKey,
-      tokenBaseProgram,
-      tokenQuoteProgram,
-    })
-    .preInstructions(preInstructions)
-    .postInstructions(postInstructions)
-    .transaction();
-
-  sendTransactionMaybeThrow(svm, transaction, [creator]);
+  throw new Error(
+    "claimCreatorTradingFee was removed in SPEC-DBC-004 Phase 3 (REQ-I-001). " +
+      "Use creatorWithdrawSurplus instead. The enclosing test should be skipped."
+  );
 }
 
 export type CreatorWithdrawSurplusParams = {

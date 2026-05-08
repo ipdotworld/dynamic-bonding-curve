@@ -6,6 +6,7 @@ import {
 } from "@solana/spl-token";
 import {
   ComputeBudgetProgram,
+  Ed25519Program,
   Keypair,
   PublicKey,
   SystemProgram,
@@ -40,6 +41,8 @@ import {
   getVirtualPoolMetadata,
 } from "../utils/fetcher";
 import { VirtualCurveProgram } from "../utils/types";
+import { getSvmAuthority } from "../utils/svm";
+import { buildEd25519Ix, serializeLaunchAuth, serializeTradeAuth } from "../utils/ed25519";
 
 export type InitializePoolParameters = {
   name: string;
@@ -109,24 +112,9 @@ export async function createPoolWithSplToken(
   program: VirtualCurveProgram,
   params: CreatePoolSplTokenParams
 ): Promise<PublicKey> {
-  const { instruction, pool, baseMintKP } =
-    await createInitializePoolWithSplTokenIx(svm, program, params);
-
-  const { payer, poolCreator } = params;
-
-  const transaction = new Transaction();
-  transaction.recentBlockhash = svm.latestBlockhash();
-
-  transaction.add(
-    ComputeBudgetProgram.setComputeUnitLimit({
-      units: 400_000,
-    }),
-    instruction
-  );
-
-  sendTransactionMaybeThrow(svm, transaction, [payer, baseMintKP, poolCreator]);
-
-  return pool;
+  // SPL Token pools are disabled — IPWorld uses Token-2022 exclusively.
+  // Redirect to createPoolWithToken2022 transparently.
+  return createPoolWithToken2022(svm, program, params);
 }
 
 export async function createPoolWithToken2022(
@@ -144,7 +132,12 @@ export async function createPoolWithToken2022(
   const hookConfig = deriveHookConfigAddress(baseMintKP.publicKey);
   const extraAccountMetaList = deriveExtraAccountMetaListAddress(baseMintKP.publicKey);
 
-  const transaction = await program.methods
+  // Build Ed25519 LaunchAuth instruction (must precede pool creation ix)
+  const authority = getSvmAuthority();
+  const launchAuthMsg = serializeLaunchAuth(poolCreator.publicKey, config, pool);
+  const ed25519Ix = buildEd25519Ix(authority, launchAuthMsg);
+
+  const poolCreateIx = await program.methods
     .initializeVirtualPoolWithToken2022(instructionParams)
     .accountsPartial({
       config,
@@ -164,9 +157,11 @@ export async function createPoolWithToken2022(
       ipworldState: deriveIpworldStateAddress(),
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
-    .transaction();
+    .instruction();
 
-  transaction.add(
+  const transaction = new Transaction().add(
+    ed25519Ix,
+    poolCreateIx,
     ComputeBudgetProgram.setComputeUnitLimit({
       units: 400_000,
     })
@@ -286,6 +281,11 @@ export async function swapPartialFill(
 
     unrapSOLIx && postInstructions.push(unrapSOLIx);
   }
+
+  // Ed25519 TradeAuth must be the instruction immediately before swap (current_idx - 1)
+  const authority = getSvmAuthority();
+  const tradeAuthMsg = serializeTradeAuth(payer.publicKey, Math.floor(Date.now() / 1000) + 3600);
+  preInstructions.push(buildEd25519Ix(authority, tradeAuthMsg));
 
   const transaction = await program.methods
     .swap2({
@@ -437,6 +437,11 @@ export async function swap(
 
     unrapSOLIx && postInstructions.push(unrapSOLIx);
   }
+
+  // Ed25519 TradeAuth must be the instruction immediately before swap (current_idx - 1)
+  const authority = getSvmAuthority();
+  const tradeAuthMsg = serializeTradeAuth(payer.publicKey, Math.floor(Date.now() / 1000) + 3600);
+  preInstructions.push(buildEd25519Ix(authority, tradeAuthMsg));
 
   const transaction = await program.methods
     .swap2({ amount0: amountIn, amount1: minimumAmountOut, swapMode: swapMode })
@@ -761,6 +766,11 @@ export async function swap2(
     unrapSOLIx && postInstructions.push(unrapSOLIx);
   }
 
+  // Ed25519 TradeAuth must be the instruction immediately before swap (current_idx - 1)
+  const authority = getSvmAuthority();
+  const tradeAuthMsg = serializeTradeAuth(payer.publicKey, Math.floor(Date.now() / 1000) + 3600);
+  preInstructions.push(buildEd25519Ix(authority, tradeAuthMsg));
+
   const transaction = await program.methods
     .swap2({
       amount0: amountIn,
@@ -884,7 +894,12 @@ export async function swapSimulate(
 
   sendTransactionMaybeThrow(svm, wrapSolTx, [payer]);
 
-  const transaction = await program.methods
+  // Ed25519 TradeAuth must be the instruction immediately before swap (current_idx - 1)
+  const authority = getSvmAuthority();
+  const tradeAuthMsg = serializeTradeAuth(payer.publicKey, Math.floor(Date.now() / 1000) + 3600);
+  const ed25519Ix = buildEd25519Ix(authority, tradeAuthMsg);
+
+  const swap2Ix = await program.methods
     .swap2({
       amount0: amountIn,
       amount1: minimumAmountOut,
@@ -907,7 +922,9 @@ export async function swapSimulate(
       ipworldState: deriveIpworldStateAddress(),
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
-    .transaction();
+    .instruction();
+
+  const transaction = new Transaction().add(ed25519Ix, swap2Ix);
 
   transaction.recentBlockhash = svm.latestBlockhash();
   transaction.feePayer = payer.publicKey;

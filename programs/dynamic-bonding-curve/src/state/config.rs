@@ -36,6 +36,10 @@ use damm_v2::types::VestingParameters as DammV2VestingParameters;
 
 use super::fee::{FeeOnAmountResult, VolatilityTracker};
 
+/// Precision denominator for IPWorld fee share fields (ip_owner_share, airdrop_share, etc.)
+/// A value of 1_000_000 means 100%. E.g. ip_owner_share = 200_000 means 20%.
+pub const FEE_SHARE_PRECISION: u32 = 1_000_000;
+
 /// base fee mode
 #[repr(u8)]
 #[derive(
@@ -125,10 +129,10 @@ impl PoolFeesConfig {
             .safe_add(base_fee_numerator.into())?;
 
         // Cap the total fee at MAX_FEE_NUMERATOR
-        let total_fee_numerator = if total_fee_numerator > MAX_FEE_NUMERATOR.into() {
+        let total_fee_numerator: u64 = if total_fee_numerator > MAX_FEE_NUMERATOR.into() {
             MAX_FEE_NUMERATOR
         } else {
-            total_fee_numerator.try_into().unwrap()
+            total_fee_numerator.try_into().map_err(|_| PoolError::TypeCastFailed)?
         };
 
         Ok(total_fee_numerator)
@@ -198,6 +202,11 @@ impl PoolFeesConfig {
         Ok((included_fee_amount, fee_amount))
     }
 
+    /// 2-stage partner/protocol fee split used by swap path to decompose fee_amount
+    /// into (trading_fee, protocol_fee, referral_fee) components for SwapResult.
+    /// apply_swap_result recombines these components into total_fee for IPWorld flat
+    /// distribution. This decomposition is retained because the components appear in
+    /// on-chain events and the referral immediate-transfer path.
     pub fn split_fees(&self, fee_amount: u64, has_referral: bool) -> Result<(u64, u64, u64)> {
         let protocol_fee =
             safe_mul_div_cast_u64(fee_amount, PROTOCOL_FEE_PERCENT.into(), 100, Rounding::Down)?;
@@ -413,7 +422,8 @@ impl TokenAuthorityOption {
     AnchorSerialize,
 )]
 pub enum MigrationOption {
-    MeteoraDamm,
+    #[deprecated(note = "DAMM v1 migration disabled — use DammV2")]
+    MeteoraDammDisabled,
     DammV2,
 }
 
@@ -490,18 +500,24 @@ pub struct PoolConfig {
     pub quote_mint: Pubkey,
     /// Address to get the fee
     pub fee_claimer: Pubkey,
-    /// Address to receive extra base token after migration, in case token is fixed supply
-    pub leftover_receiver: Pubkey,
     /// Pool fee
     pub pool_fees: PoolFeesConfig,
     // Partner liquidity vesting info, only available for DAMM v2 migration
     pub partner_liquidity_vesting_info: LiquidityVestingInfo,
     // Creator liquidity vesting info, only available for DAMM v2 migration
     pub creator_liquidity_vesting_info: LiquidityVestingInfo,
-    /// Padding for future use
-    pub padding_0: [u8; 14],
-    /// Previously was protocol and referral fee percent. Beware of tombstone.
-    pub padding_1: u16,
+    /// IPWorld fee share: IP owner's share of quote fee (SELL side), in FEE_SHARE_PRECISION units
+    pub ip_owner_share: u32,
+    /// IPWorld fee share: airdrop (UGC+Holder) share of quote fee (SELL side), in FEE_SHARE_PRECISION units
+    pub airdrop_share: u32,
+    /// IPWorld fee share: referral share of quote fee (SELL side), in FEE_SHARE_PRECISION units
+    pub referral_share: u32,
+    /// Padding (formerly `creator_share: u32`, removed in SPEC-DBC-004 Phase 3 — REQ-I-001).
+    /// Retained as 4-byte zero-pad so `swap_base_amount: u64` keeps its
+    /// 8-byte alignment (Pod / zero_copy requirement). On-chain layout for the
+    /// post-`creator_share` portion is preserved; PoolConfig::INIT_SPACE remains
+    /// at the pre-Phase-3 value (1008).
+    pub _padding_creator_share: [u8; 4],
     /// Collect fee mode
     pub collect_fee_mode: u8,
     /// migration option
@@ -534,9 +550,11 @@ pub struct PoolConfig {
     pub token_update_authority: u8,
     /// migration fee percentage
     pub migration_fee_percentage: u8,
-    /// creator migration fee percentage
-    pub creator_migration_fee_percentage: u8,
-    pub padding_2: [u8; 7],
+    /// Explicit alignment padding so that token_airdrop_share (u32) is 4-byte aligned.
+    /// Increased from [u8;3] to [u8;4] after removing creator_migration_fee_percentage (u8).
+    pub fee_config_padding: [u8; 4],
+    /// IPWorld fee share: token airdrop share of base fee (BUY side), in FEE_SHARE_PRECISION units
+    pub token_airdrop_share: u32,
     /// swap base amount
     pub swap_base_amount: u64,
     /// migration quote threshold (in quote token)
@@ -573,7 +591,7 @@ pub struct PoolConfig {
     pub curve: [LiquidityDistributionConfig; MAX_CURVE_POINT_CONFIG],
 }
 
-const_assert_eq!(PoolConfig::INIT_SPACE, 1040);
+const_assert_eq!(PoolConfig::INIT_SPACE, 1008);
 
 #[zero_copy]
 #[derive(Debug, Default, InitSpace)]
@@ -697,7 +715,6 @@ impl PoolConfig {
         &mut self,
         quote_mint: &Pubkey,
         fee_claimer: &Pubkey,
-        leftover_receiver: &Pubkey,
         pool_fees: &PoolFeeParameters,
         creator_trading_fee_percentage: u8,
         token_update_authority: u8,
@@ -733,16 +750,18 @@ impl PoolConfig {
         migrated_pool_market_cap_fee_scheduler: MigratedPoolMarketCapFeeSchedulerParams,
         curve: &[LiquidityDistributionParameters],
         enable_creator_first_swap_with_min_fee: u8,
+        ip_owner_share: u32,
+        airdrop_share: u32,
+        referral_share: u32,
+        token_airdrop_share: u32,
     ) -> Result<()> {
         self.version = 0;
         self.quote_mint = *quote_mint;
         self.fee_claimer = *fee_claimer;
-        self.leftover_receiver = *leftover_receiver;
         self.pool_fees = pool_fees.to_pool_fees_config();
         self.creator_trading_fee_percentage = creator_trading_fee_percentage;
         self.token_update_authority = token_update_authority;
         self.migration_fee_percentage = migration_fee.fee_percentage;
-        self.creator_migration_fee_percentage = migration_fee.creator_fee_percentage;
         self.collect_fee_mode = collect_fee_mode;
         self.migration_option = migration_option;
         self.activation_type = activation_type;
@@ -789,6 +808,13 @@ impl PoolConfig {
 
         self.enable_first_swap_with_min_fee = enable_creator_first_swap_with_min_fee;
 
+        // IPWorld flat fee distribution shares (4-way SELL: ip_owner, airdrop, referral, treasury)
+        // — `creator_share` removed in SPEC-DBC-004 Phase 3 (REQ-I-001).
+        self.ip_owner_share = ip_owner_share;
+        self.airdrop_share = airdrop_share;
+        self.referral_share = referral_share;
+        self.token_airdrop_share = token_airdrop_share;
+
         for i in 0..curve.len() {
             self.curve[i] = curve[i].to_liquidity_distribution_config();
         }
@@ -825,13 +851,10 @@ impl PoolConfig {
     pub fn get_migration_fee_distribution(&self) -> Result<MigrationFeeDistribution> {
         let MigrationAmount { fee, .. } = self.get_migration_quote_amount_for_config()?;
 
-        let creator_migration_fee = safe_mul_div_cast_u64(
-            fee,
-            self.creator_migration_fee_percentage.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let partner_migration_fee = fee.safe_sub(creator_migration_fee)?;
+        // AC-A07: 100% of migration fee goes to treasury (operator).
+        // Creator split removed.
+        let creator_migration_fee: u64 = 0;
+        let partner_migration_fee = fee;
         Ok(MigrationFeeDistribution {
             partner_migration_fee,
             creator_migration_fee,
@@ -913,69 +936,8 @@ impl PoolConfig {
         self.fixed_token_supply_flag == 1
     }
 
-    pub fn get_liquidity_distribution(&self, liquidity: u128) -> Result<LiquidityDistribution> {
-        let partner_permanent_locked_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.partner_permanent_locked_liquidity_percentage.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let partner_vested_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.partner_liquidity_vesting_info
-                .vesting_percentage
-                .into(),
-            100,
-            Rounding::Down,
-        )?;
-        let partner_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.partner_liquidity_percentage.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let creator_permanent_locked_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.creator_permanent_locked_liquidity_percentage.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let creator_vested_liquidity = safe_mul_div_cast_u128(
-            liquidity,
-            self.creator_liquidity_vesting_info
-                .vesting_percentage
-                .into(),
-            100,
-            Rounding::Down,
-        )?;
-
-        let creator_liquidity = liquidity
-            .safe_sub(partner_liquidity)?
-            .safe_sub(partner_permanent_locked_liquidity)?
-            .safe_sub(partner_vested_liquidity)?
-            .safe_sub(creator_permanent_locked_liquidity)?
-            .safe_sub(creator_vested_liquidity)?;
-
-        Ok(LiquidityDistribution {
-            partner: LiquidityDistributionItem {
-                unlocked_liquidity: partner_liquidity,
-                permanent_locked_liquidity: partner_permanent_locked_liquidity,
-                vested_liquidity: partner_vested_liquidity,
-                permanent_locked_liquidity_percentage: self
-                    .partner_permanent_locked_liquidity_percentage,
-                liquidity_vesting_info: self.partner_liquidity_vesting_info,
-            },
-            creator: LiquidityDistributionItem {
-                unlocked_liquidity: creator_liquidity,
-                permanent_locked_liquidity: creator_permanent_locked_liquidity,
-                vested_liquidity: creator_vested_liquidity,
-                permanent_locked_liquidity_percentage: self
-                    .creator_permanent_locked_liquidity_percentage,
-                liquidity_vesting_info: self.creator_liquidity_vesting_info,
-            },
-        })
-    }
-
+    /// Splits surplus between partner and creator based on creator_trading_fee_percentage.
+    /// Used by get_partner_surplus / get_creator_surplus for surplus withdrawal paths.
     pub fn split_partner_and_creator_fee(&self, fee: u64) -> Result<PartnerAndCreatorSplitFee> {
         // early return
         if self.creator_trading_fee_percentage == 0 {
@@ -1244,39 +1206,6 @@ impl LiquidityDistributionItem {
             .get_damm_v2_vesting_parameters(self.vested_liquidity, current_timestamp)
     }
 
-    pub fn adjust_liquidity(&mut self, adjusted_total_liquidity: u128) -> Result<()> {
-        let vesting_percentage = self.liquidity_vesting_info.vesting_percentage;
-        let total_locked_percentage =
-            vesting_percentage.safe_add(self.permanent_locked_liquidity_percentage)?;
-
-        if total_locked_percentage == 0 {
-            // both vesting_percentage and permanent_locked_liquidity_percentage are equal zero
-            self.unlocked_liquidity = adjusted_total_liquidity;
-            self.permanent_locked_liquidity = 0;
-            self.vested_liquidity = 0;
-        } else {
-            let unlocked_liquidity = adjusted_total_liquidity.min(self.unlocked_liquidity);
-            let liquidity_subject_to_lock =
-                adjusted_total_liquidity.safe_sub(unlocked_liquidity)?;
-
-            let vested_liquidity = safe_mul_div_cast_u128(
-                liquidity_subject_to_lock,
-                vesting_percentage.into(),
-                total_locked_percentage.into(),
-                Rounding::Down,
-            )?;
-
-            let permanent_locked_liquidity =
-                liquidity_subject_to_lock.safe_sub(vested_liquidity)?;
-
-            self.unlocked_liquidity = unlocked_liquidity;
-            self.permanent_locked_liquidity = permanent_locked_liquidity;
-            self.vested_liquidity = vested_liquidity;
-            // is this fine to dont re-calculate permanent_locked_liquidity_percentage and vesting_percentage?
-        }
-
-        Ok(())
-    }
 }
 
 pub struct MigrationAmount {

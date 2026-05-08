@@ -14,6 +14,7 @@ use crate::{
         MAX_MIGRATION_FEE_PERCENTAGE, MAX_SQRT_PRICE, MIN_LOCKED_LIQUIDITY_BPS,
         MIN_MIGRATED_POOL_FEE_BPS, MIN_SQRT_PRICE,
     },
+    state::config::FEE_SHARE_PRECISION,
     damm_v2_utils::{
         validate_vesting_parameters, BaseFeeMode as DammV2BaseFeeMode, DammV2DynamicFee,
         DammV2PodAlignedFeeMarketCapScheduler,
@@ -70,6 +71,15 @@ pub struct ConfigParameters {
     /// padding for future use
     pub padding: [u8; 2],
     pub curve: Vec<LiquidityDistributionParameters>,
+    /// IPWorld fee shares (in FEE_SHARE_PRECISION = 1_000_000 units)
+    /// ip_owner_share + airdrop_share + referral_share must be < 1_000_000
+    /// (SPEC-DBC-004 Phase 3 — REQ-I-001: `creator_share` removed from the
+    /// IPWorld 4-way SELL fee model)
+    pub ip_owner_share: u32,
+    pub airdrop_share: u32,
+    pub referral_share: u32,
+    /// token_airdrop_share must be < 1_000_000 (independent of quote fee shares)
+    pub token_airdrop_share: u32,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, InitSpace)]
@@ -150,6 +160,22 @@ impl MigratedPoolFeeValidator {
             self.pool_fee_bps >= MIN_MIGRATED_POOL_FEE_BPS
                 && self.pool_fee_bps <= MAX_MIGRATED_POOL_FEE_BPS,
             PoolError::InvalidMigratedPoolFee
+        );
+
+        // SPEC-DBC-004 REQ-I-002: IPWorld enforces DAMM v2 OnlyB and zero compounding
+        // on the migrated pool. The DBC `MigratedCollectFeeMode::QuoteToken` (value 0)
+        // is what maps to DAMM v2 OnlyB (value 1) per migration_handler::to_dammv2.
+        // The SPEC text references "1 (OnlyB)" using DAMM v2's numeric value; the DBC
+        // field stores the DBC enum value, so QuoteToken (==0) is the OnlyB-equivalent.
+        let migrated_collect_fee_mode = self.collect_fee_mode;
+        let migrated_compounding_fee_bps = self.compounding_fee_bps;
+        require!(
+            migrated_collect_fee_mode == MigratedCollectFeeMode::QuoteToken as u8,
+            PoolError::InvalidMigratedFeeConfig
+        );
+        require!(
+            migrated_compounding_fee_bps == 0,
+            PoolError::InvalidMigratedFeeConfig
         );
 
         // validate collect fee mode
@@ -398,6 +424,13 @@ impl ConfigParameters {
             CollectFeeMode::try_from(self.collect_fee_mode).is_ok(),
             PoolError::InvalidCollectFeeMode
         );
+        // IPWorld requires OutputToken mode for dual-stream fee distribution
+        let collect_fee_mode_enum = CollectFeeMode::try_from(self.collect_fee_mode)
+            .map_err(|_| PoolError::InvalidCollectFeeMode)?;
+        require!(
+            collect_fee_mode_enum == CollectFeeMode::OutputToken,
+            PoolError::InvalidCollectFeeMode
+        );
         // validate migration option and token type
         let migration_option_value = MigrationOption::try_from(self.migration_option)
             .map_err(|_| PoolError::InvalidMigrationOption)?;
@@ -406,7 +439,7 @@ impl ConfigParameters {
         let migration_fee_option = MigrationFeeOption::try_from(self.migration_fee_option)
             .map_err(|_| PoolError::InvalidMigrationFeeOption)?;
 
-        let token_type_value =
+        let _token_type_value =
             TokenType::try_from(self.token_type).map_err(|_| PoolError::InvalidTokenType)?;
 
         let migrated_pool_fee_validator = MigratedPoolFeeValidator::new(
@@ -417,30 +450,8 @@ impl ConfigParameters {
         );
 
         match migration_option_value {
-            MigrationOption::MeteoraDamm => {
-                require!(
-                    token_type_value == TokenType::SplToken,
-                    PoolError::InvalidTokenType
-                );
-                require!(
-                    *quote_mint.to_account_info().owner == anchor_spl::token::Token::id(),
-                    PoolError::InvalidQuoteMint
-                );
-
-                require!(
-                    migration_fee_option != MigrationFeeOption::Customizable
-                        && migrated_pool_fee_validator.is_none(),
-                    PoolError::InvalidMigrationFeeOption
-                );
-                // validate vesting
-                require!(
-                    self.partner_liquidity_vesting_info.is_zero(),
-                    PoolError::InvalidVestingParameters
-                );
-                require!(
-                    self.creator_liquidity_vesting_info.is_zero(),
-                    PoolError::InvalidVestingParameters
-                );
+            MigrationOption::MeteoraDammDisabled => {
+                return Err(PoolError::InvalidMigrationOption.into());
             }
             MigrationOption::DammV2 => {
                 if migration_fee_option == MigrationFeeOption::Customizable {
@@ -531,6 +542,25 @@ impl ConfigParameters {
             PoolError::InvalidCurve
         );
 
+        // Validate IPWorld fee shares
+        // Quote fee shares (SELL side): sum must be strictly less than FEE_SHARE_PRECISION (remainder goes to protocol treasury)
+        // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed from the sum.
+        let total_quote_share = self
+            .ip_owner_share
+            .checked_add(self.airdrop_share)
+            .ok_or(PoolError::MathOverflow)?
+            .checked_add(self.referral_share)
+            .ok_or(PoolError::MathOverflow)?;
+        require!(
+            total_quote_share < FEE_SHARE_PRECISION,
+            PoolError::InvalidFeePercentage
+        );
+        // Base fee share (BUY side): must be strictly less than FEE_SHARE_PRECISION (remainder goes to ip_treasury)
+        require!(
+            self.token_airdrop_share < FEE_SHARE_PRECISION,
+            PoolError::InvalidFeePercentage
+        );
+
         Ok(())
     }
 }
@@ -548,8 +578,6 @@ pub struct CreateConfigCtx<'info> {
 
     /// CHECK: fee_claimer
     pub fee_claimer: UncheckedAccount<'info>,
-    /// CHECK: owner extra base token in case token is fixed supply
-    pub leftover_receiver: UncheckedAccount<'info>,
     /// quote mint
     pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
 
@@ -596,6 +624,10 @@ pub fn handle_create_config(
         migrated_pool_market_cap_fee_scheduler_params,
         enable_first_swap_with_min_fee,
         compounding_fee_bps,
+        ip_owner_share,
+        airdrop_share,
+        referral_share,
+        token_airdrop_share,
         ..
     } = config_parameters.clone();
 
@@ -683,10 +715,6 @@ pub fn handle_create_config(
             )?;
 
             require!(
-                ctx.accounts.leftover_receiver.key() != Pubkey::default(),
-                PoolError::InvalidLeftoverAddress
-            );
-            require!(
                 minimum_base_supply_without_buffer <= post_migration_token_supply
                     && post_migration_token_supply <= pre_migration_token_supply
                     && minimum_base_supply_with_buffer <= pre_migration_token_supply,
@@ -707,7 +735,6 @@ pub fn handle_create_config(
     config.init(
         &ctx.accounts.quote_mint.key(),
         ctx.accounts.fee_claimer.key,
-        ctx.accounts.leftover_receiver.key,
         &pool_fees,
         creator_trading_fee_percentage,
         token_update_authority,
@@ -743,6 +770,10 @@ pub fn handle_create_config(
         migrated_pool_market_cap_fee_scheduler_params,
         &curve,
         enable_first_swap_with_min_fee.into(),
+        ip_owner_share,
+        airdrop_share,
+        referral_share,
+        token_airdrop_share,
     )?;
 
     // re-validate total locked liquidity
@@ -756,7 +787,7 @@ pub fn handle_create_config(
         config: ctx.accounts.config.key(),
         fee_claimer: ctx.accounts.fee_claimer.key(),
         quote_mint: ctx.accounts.quote_mint.key(),
-        owner: ctx.accounts.leftover_receiver.key(),
+        owner: Pubkey::default(),
         pool_fees,
         collect_fee_mode,
         migration_option,
@@ -783,7 +814,6 @@ pub fn handle_create_config(
         config: ctx.accounts.config.key(),
         fee_claimer: ctx.accounts.fee_claimer.key(),
         quote_mint: ctx.accounts.quote_mint.key(),
-        leftover_receiver: ctx.accounts.leftover_receiver.key(),
         config_parameters: config_parameters
     });
 

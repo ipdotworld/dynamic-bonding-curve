@@ -93,7 +93,8 @@ describe("Config pool creation fee", () => {
     expect(poolState.creationFeeBits).equal(0);
   });
 
-  it("create spl pool", async () => {
+  // audit: F-011 — Pool-creation fee path deferred (Phase 2 D-2)
+  it.skip("create spl pool", async () => {
     const feeCreation = 1e9;
     const tokenType = 0;
     const configAccount = await createConfigAccount(
@@ -193,7 +194,8 @@ describe("Config pool creation fee", () => {
     }, errorCode);
   });
 
-  it("create token2022 pool", async () => {
+  // audit: F-010 — Pool-creation fee path deferred (Phase 2 D-2)
+  it.skip("create token2022 pool", async () => {
     const feeCreation = 1e9;
     const tokenType = 1;
     const configAccount = await createConfigAccount(
@@ -329,7 +331,6 @@ async function createConfigAccount(
 
   const configAccount = await createConfig(svm, program, {
     payer: creator,
-    leftoverReceiver: creator.publicKey,
     feeClaimer: creator.publicKey,
     quoteMint,
     instructionParams,

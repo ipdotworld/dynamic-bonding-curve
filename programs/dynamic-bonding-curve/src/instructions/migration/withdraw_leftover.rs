@@ -4,12 +4,17 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use crate::{
     const_pda,
     safe_math::SafeMath,
-    state::{MigrationProgress, PoolConfig, VirtualPool},
+    state::{MigrationProgress, PoolConfig, TokenVerification, VirtualPool},
     token::transfer_token_from_pool_authority,
     EvtWithdrawLeftover, PoolError,
 };
 
 /// Accounts for withdraw leftover
+///
+/// AC-A08: leftover is sent to `ip_treasury` from the pool's TokenVerification PDA.
+/// If `ip_treasury` is not yet set (== Pubkey::default()), the instruction reverts
+/// with `IpTreasuryNotSet`. The leftover stays in the vault until `set_ip_treasury`
+/// is called for this pool.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct WithdrawLeftoverCtx<'info> {
@@ -19,7 +24,6 @@ pub struct WithdrawLeftoverCtx<'info> {
     )]
     pub pool_authority: UncheckedAccount<'info>,
 
-    #[account(has_one=leftover_receiver)]
     pub config: AccountLoader<'info, PoolConfig>,
 
     #[account(
@@ -30,9 +34,17 @@ pub struct WithdrawLeftoverCtx<'info> {
     )]
     pub virtual_pool: AccountLoader<'info, VirtualPool>,
 
-    /// The receiver token account, withdraw to ATA
+    /// The TokenVerification PDA for this pool.
+    /// Holds `ip_treasury` — the destination for leftover tokens.
+    #[account(
+        seeds = [TokenVerification::SEED, virtual_pool.key().as_ref()],
+        bump = token_verification.bump,
+    )]
+    pub token_verification: Account<'info, TokenVerification>,
+
+    /// The receiver token account, withdraw to ATA of ip_treasury
     #[account(mut,
-        associated_token::authority = leftover_receiver,
+        associated_token::authority = token_verification.ip_treasury,
         associated_token::mint = base_mint,
         associated_token::token_program = token_base_program
     )]
@@ -42,11 +54,8 @@ pub struct WithdrawLeftoverCtx<'info> {
     #[account(mut, token::token_program = token_base_program, token::mint = base_mint)]
     pub base_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// The mint of quote token
+    /// The mint of base token
     pub base_mint: Box<InterfaceAccount<'info, Mint>>,
-
-    /// CHECK: leftover receiver
-    pub leftover_receiver: UncheckedAccount<'info>,
 
     /// Token base program
     pub token_base_program: Interface<'info, TokenInterface>,
@@ -54,6 +63,13 @@ pub struct WithdrawLeftoverCtx<'info> {
 
 pub fn handle_withdraw_leftover<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, WithdrawLeftoverCtx<'info>>) -> Result<()> {
     let config = ctx.accounts.config.load()?;
+
+    // AC-A08: ip_treasury must be set before withdrawing leftover.
+    let ip_treasury = ctx.accounts.token_verification.ip_treasury;
+    require!(
+        ip_treasury != Pubkey::default(),
+        PoolError::IpTreasuryNotSet
+    );
 
     let mut virtual_pool = ctx.accounts.virtual_pool.load_mut()?;
     require!(
@@ -94,7 +110,7 @@ pub fn handle_withdraw_leftover<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info
 
     emit_cpi!(EvtWithdrawLeftover {
         pool: ctx.accounts.virtual_pool.key(),
-        leftover_receiver: ctx.accounts.leftover_receiver.key(),
+        ip_treasury,
         leftover_amount,
     });
     Ok(())

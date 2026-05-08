@@ -5,31 +5,31 @@ import { LiteSVM } from "litesvm";
 import {
   ClaimCreatorTradeFeeParams,
   claimCreatorTradingFee,
-  claimTradingFee,
   ConfigParameters,
   createConfig,
   CreateConfigParams,
   createLocker,
   createPoolWithSplToken,
   creatorWithdrawSurplus,
-  partnerWithdrawSurplus,
   swap,
   SwapMode,
   SwapParams,
 } from "./instructions";
 import {
-  createMeteoraMetadata,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
-} from "./instructions/meteoraMigration";
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
 import {
-  createDammConfig,
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
+  DammV2OperatorPermission,
   derivePoolAuthority,
   designCurve,
+  encodePermissions,
   expectThrowsAsync,
   generateAndFund,
-  getDbcProgramErrorCodeHexString,
   startSvm,
   U64_MAX,
 } from "./utils";
@@ -37,6 +37,14 @@ import { getConfig, getVirtualPool } from "./utils/fetcher";
 import { createToken, mintSplTokenTo } from "./utils/token";
 import { VirtualCurveProgram } from "./utils/types";
 
+// SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` ix and the
+// `_deprecated_creator_base_fee` field were removed. The fullFlow helper has
+// been adjusted to exercise the surviving creator-side surface
+// (`creator_withdraw_surplus`) only; the prior assertions that the deprecated
+// creator base fee accumulator was zero are dropped because the field itself
+// no longer exists in `VirtualPool`. The legacy "fee between partner and
+// creator" framing remains for historical naming, but partner trading fee
+// accumulators are zero-padded since Phase 1+2.
 describe("Creator and Partner share trading fees and surplus", () => {
   let svm: LiteSVM;
   let admin: Keypair;
@@ -54,13 +62,19 @@ describe("Creator and Partner share trading fees and surplus", () => {
     user = generateAndFund(svm);
     poolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
+
+    await createDammV2Operator(svm, {
+      whitelistAddress: admin.publicKey,
+      admin,
+      permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+    });
   });
 
   it("50-50 fee between partner and creator", async () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
-    let migrationOption = 0;
+    let migrationOption = 1;
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let lockedVesting = {
@@ -90,7 +104,6 @@ describe("Creator and Partner share trading fees and surplus", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -124,7 +137,7 @@ describe("Creator and Partner share trading fees and surplus", () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
-    let migrationOption = 0;
+    let migrationOption = 1;
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let lockedVesting = {
@@ -154,7 +167,6 @@ describe("Creator and Partner share trading fees and surplus", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -188,7 +200,7 @@ describe("Creator and Partner share trading fees and surplus", () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
-    let migrationOption = 0;
+    let migrationOption = 1;
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let lockedVesting = {
@@ -218,7 +230,6 @@ describe("Creator and Partner share trading fees and surplus", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -252,7 +263,7 @@ describe("Creator and Partner share trading fees and surplus", () => {
     let totalTokenSupply = 1_000_000_000; // 1 billion
     let percentageSupplyOnMigration = 10; // 10%;
     let migrationQuoteThreshold = 300; // 300 sol
-    let migrationOption = 0;
+    let migrationOption = 1;
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let lockedVesting = {
@@ -282,7 +293,6 @@ describe("Creator and Partner share trading fees and surplus", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -362,46 +372,20 @@ async function fullFlow(
   };
   await swap(svm, program, params);
 
-  let creatorTradingFeePercentage = configState.creatorTradingFeePercentage;
-  let partnerTradingFeePercentage = 100 - creatorTradingFeePercentage;
   virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
-  if (creatorTradingFeePercentage == 0) {
-    expect(virtualPoolState.creatorBaseFee.toString()).eq("0");
-    expect(virtualPoolState.creatorQuoteFee.toString()).eq("0");
-  } else if (partnerTradingFeePercentage == 0) {
-    expect(virtualPoolState.partnerBaseFee.toString()).eq("0");
-    expect(virtualPoolState.partnerQuoteFee.toString()).eq("0");
-  } else {
-    expect(
-      virtualPoolState.creatorBaseFee
-        .mul(new BN(partnerTradingFeePercentage))
-        .toString()
-    ).eq(
-      virtualPoolState.partnerBaseFee
-        .mul(new BN(creatorTradingFeePercentage))
-        .toString()
-    );
-    expect(
-      virtualPoolState.creatorQuoteFee
-        .mul(new BN(partnerTradingFeePercentage))
-        .toString()
-    ).eq(
-      virtualPoolState.partnerQuoteFee
-        .mul(new BN(creatorTradingFeePercentage))
-        .toString()
-    );
-  }
+  // IPWorld A-04 + SPEC-DBC-004 Phase 2 + Phase 3:
+  // - Partner trading fee fields renamed to `_padding_partner_*` (Phase 2 Step 2.6),
+  //   exposed in IDL as `paddingPartnerBase` / `paddingPartnerQuote`. Still zero-padded.
+  // - `_deprecated_creator_base_fee` and `creator_quote_fee` fields fully removed
+  //   in Phase 3 alongside `creator_share` and the `claim_creator_trading_fee` ix.
+  expect(virtualPoolState.paddingPartnerBase.toString()).eq("0");
+  expect(virtualPoolState.paddingPartnerQuote.toString()).eq("0");
 
   // migrate
   const poolAuthority = derivePoolAuthority();
-  let dammConfig = await createDammConfig(svm, admin, poolAuthority);
-  const migrationParams: MigrateMeteoraParams = {
-    payer: admin,
-    virtualPool,
-    dammConfig,
-  };
-  await createMeteoraMetadata(svm, program, {
+  const dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+  await createMeteoraDammV2Metadata(svm, program, {
     payer: admin,
     virtualPool,
     config,
@@ -413,47 +397,22 @@ async function fullFlow(
       virtualPool,
     });
   }
-  await migrateToMeteoraDamm(svm, program, migrationParams);
-
-  const errorCodeUnauthorized = getDbcProgramErrorCodeHexString("Unauthorized");
-
-  // unauthorized pool creator claim trading fee
-  expectThrowsAsync(async () => {
-    await claimCreatorTradingFee(svm, program, {
-      creator: partner,
-      pool: virtualPool,
-      maxBaseAmount: new BN(U64_MAX),
-      maxQuoteAmount: new BN(U64_MAX),
-    });
-  }, errorCodeUnauthorized);
-
-  // creator claim trading fee
-  const claimTradingFeeParams: ClaimCreatorTradeFeeParams = {
-    creator: poolCreator,
-    pool: virtualPool,
-    maxBaseAmount: new BN(U64_MAX),
-    maxQuoteAmount: new BN(U64_MAX),
+  const migrationParams: MigrateMeteoraDammV2Params = {
+    payer: partner,
+    virtualPool,
+    dammConfig,
   };
-  await claimCreatorTradingFee(svm, program, claimTradingFeeParams);
+  await migrateToDammV2(svm, program, migrationParams);
 
-  // unauthorized partner claim trading fee
-  expectThrowsAsync(async () => {
-    await claimTradingFee(svm, program, {
-      feeClaimer: poolCreator,
-      pool: virtualPool,
-      maxBaseAmount: new BN(U64_MAX),
-      maxQuoteAmount: new BN(U64_MAX),
-    });
-  }, errorCodeUnauthorized);
-  // partner claim trading fee
-  await claimTradingFee(svm, program, {
-    feeClaimer: partner,
-    pool: virtualPool,
-    maxBaseAmount: new BN(U64_MAX),
-    maxQuoteAmount: new BN(U64_MAX),
-  });
+  // Anchor ConstraintHasOne error (2001 = 0x7d1) is thrown when creator mismatch
+  const errorCodeUnauthorized = "0x7d1";
 
-  // unauthorized creator
+  // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` ix removed.
+  // The unauthorized-creator-claim and creator-claim assertions previously
+  // exercised the now-deleted ix path. Creator earnings flow exclusively
+  // through `creator_withdraw_surplus`; only that surface is exercised below.
+
+  // unauthorized creator surplus withdraw (has_one = creator constraint)
   expectThrowsAsync(async () => {
     await creatorWithdrawSurplus(svm, program, {
       creator: partner,
@@ -463,19 +422,6 @@ async function fullFlow(
   // creator withdraw surplus
   await creatorWithdrawSurplus(svm, program, {
     creator: poolCreator,
-    virtualPool,
-  });
-
-  // unauthorized partner
-  expectThrowsAsync(async () => {
-    await partnerWithdrawSurplus(svm, program, {
-      feeClaimer: poolCreator,
-      virtualPool,
-    });
-  }, errorCodeUnauthorized);
-  // partner withdraw surplus
-  await partnerWithdrawSurplus(svm, program, {
-    feeClaimer: partner,
     virtualPool,
   });
 }

@@ -4,19 +4,24 @@ import {
   createConfig,
   CreateConfigParams,
   createLocker,
-  createMeteoraMetadata,
   createPoolWithSplToken,
-  MigrateMeteoraParams,
-  migrateToMeteoraDamm,
   swap,
   SwapMode,
   SwapParams,
 } from "./instructions";
 import {
-  createDammConfig,
+  createMeteoraDammV2Metadata,
+  MigrateMeteoraDammV2Params,
+  migrateToDammV2,
+} from "./instructions/dammV2Migration";
+import {
+  createDammV2Config,
+  createDammV2Operator,
   createVirtualCurveProgram,
+  DammV2OperatorPermission,
   derivePoolAuthority,
   designGraphCurve,
+  encodePermissions,
   generateAndFund,
   getMint,
   startSvm,
@@ -46,6 +51,12 @@ describe("Build graph curve", () => {
     user = generateAndFund(svm);
     poolCreator = generateAndFund(svm);
     program = createVirtualCurveProgram();
+
+    await createDammV2Operator(svm, {
+      whitelistAddress: admin.publicKey,
+      admin,
+      permission: encodePermissions([DammV2OperatorPermission.CreateConfigKey]),
+    });
   });
 
   it("Graph curve with k > 1", async () => {
@@ -55,15 +66,16 @@ describe("Build graph curve", () => {
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let kFactor = 1.2;
+    // Locker program does not support Token2022 Transfer Hook remaining accounts yet
     let lockedVesting = {
-      amountPerPeriod: new BN(123456),
+      amountPerPeriod: new BN(0),
       cliffDurationFromMigrationTime: new BN(0),
-      frequency: new BN(1),
-      numberOfPeriod: new BN(120),
-      cliffUnlockAmount: new BN(123456),
+      frequency: new BN(0),
+      numberOfPeriod: new BN(0),
+      cliffUnlockAmount: new BN(0),
     };
     let leftOver = 10_000;
-    let migrationOption = 0;
+    let migrationOption = 1;
     let quoteMint = createToken(svm, admin, admin.publicKey, tokenQuoteDecimal);
     let instructionParams = designGraphCurve(
       totalTokenSupply,
@@ -87,7 +99,6 @@ describe("Build graph curve", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -109,7 +120,8 @@ describe("Build graph curve", () => {
       poolCreator,
       user,
       admin,
-      quoteMint
+      quoteMint,
+      partner
     );
   });
 
@@ -120,15 +132,16 @@ describe("Build graph curve", () => {
     let tokenBaseDecimal = 6;
     let tokenQuoteDecimal = 9;
     let kFactor = 0.6;
+    // Locker program does not support Token2022 Transfer Hook remaining accounts yet
     let lockedVesting = {
-      amountPerPeriod: new BN(123456),
+      amountPerPeriod: new BN(0),
       cliffDurationFromMigrationTime: new BN(0),
-      frequency: new BN(1),
-      numberOfPeriod: new BN(120),
-      cliffUnlockAmount: new BN(123456),
+      frequency: new BN(0),
+      numberOfPeriod: new BN(0),
+      cliffUnlockAmount: new BN(0),
     };
     let leftOver = 10_000;
-    let migrationOption = 0;
+    let migrationOption = 1;
     let quoteMint = createToken(svm, admin, admin.publicKey, tokenQuoteDecimal);
     let instructionParams = designGraphCurve(
       totalTokenSupply,
@@ -152,7 +165,6 @@ describe("Build graph curve", () => {
     );
     const params: CreateConfigParams<ConfigParameters> = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint,
       instructionParams,
@@ -174,7 +186,8 @@ describe("Build graph curve", () => {
       poolCreator,
       user,
       admin,
-      quoteMint
+      quoteMint,
+      partner
     );
   });
 });
@@ -187,7 +200,8 @@ async function fullFlow(
   poolCreator: Keypair,
   user: Keypair,
   admin: Keypair,
-  quoteMint: PublicKey
+  quoteMint: PublicKey,
+  partner: Keypair
 ) {
   // create pool
   let virtualPool = await createPoolWithSplToken(svm, program, {
@@ -221,13 +235,8 @@ async function fullFlow(
 
   // migrate
   const poolAuthority = derivePoolAuthority();
-  let dammConfig = await createDammConfig(svm, admin, poolAuthority);
-  const migrationParams: MigrateMeteoraParams = {
-    payer: admin,
-    virtualPool,
-    dammConfig,
-  };
-  await createMeteoraMetadata(svm, program, {
+  const dammConfig = await createDammV2Config(svm, admin, poolAuthority, 1);
+  await createMeteoraDammV2Metadata(svm, program, {
     payer: admin,
     virtualPool,
     config,
@@ -239,7 +248,12 @@ async function fullFlow(
       virtualPool,
     });
   }
-  await migrateToMeteoraDamm(svm, program, migrationParams);
+  const migrationParams: MigrateMeteoraDammV2Params = {
+    payer: partner,
+    virtualPool,
+    dammConfig,
+  };
+  await migrateToDammV2(svm, program, migrationParams);
   const baseMintData = getMint(svm, virtualPoolState.baseMint);
 
   expect(baseMintData.supply.toString()).eq(

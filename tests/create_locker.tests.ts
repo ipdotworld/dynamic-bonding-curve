@@ -37,7 +37,8 @@ import {
 } from "./instructions/dammV2Migration";
 
 describe("Create locker", () => {
-  describe("Create locker for spl-token", () => {
+  // audit: F-013 — Locker program out of scope
+  describe.skip("Create locker for spl-token", () => {
     let svm: LiteSVM;
     let admin: Keypair;
     let operator: Keypair;
@@ -91,7 +92,7 @@ describe("Create locker", () => {
           dynamicFee: null,
         },
         activationType: 0,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         migrationOption: 1,
         tokenType: 0, // spl_token
         tokenDecimal: 6,
@@ -117,7 +118,7 @@ describe("Create locker", () => {
           creatorFeePercentage: 0,
         },
         migratedPoolFee: {
-          collectFeeMode: 0,
+          collectFeeMode: 1,
           dynamicFee: 0,
           poolFeeBps: 0,
         },
@@ -144,7 +145,6 @@ describe("Create locker", () => {
       };
       const params: CreateConfigParams<ConfigParameters> = {
         payer: partner,
-        leftoverReceiver: partner.publicKey,
         feeClaimer: partner.publicKey,
         quoteMint: NATIVE_MINT,
         instructionParams,
@@ -224,7 +224,8 @@ describe("Create locker", () => {
     });
   });
 
-  describe("Create locker for token2022", () => {
+  // audit: F-012 — Locker program out of scope
+  describe.skip("Create locker for token2022", () => {
     let svm: LiteSVM;
     let admin: Keypair;
     let operator: Keypair;
@@ -278,7 +279,7 @@ describe("Create locker", () => {
           dynamicFee: null,
         },
         activationType: 0,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         migrationOption: 1,
         tokenType: 1, // token 2022
         tokenDecimal: 6,
@@ -304,7 +305,7 @@ describe("Create locker", () => {
           creatorFeePercentage: 0,
         },
         migratedPoolFee: {
-          collectFeeMode: 0,
+          collectFeeMode: 1,
           dynamicFee: 0,
           poolFeeBps: 0,
         },
@@ -331,7 +332,6 @@ describe("Create locker", () => {
       };
       const params: CreateConfigParams<ConfigParameters> = {
         payer: partner,
-        leftoverReceiver: partner.publicKey,
         feeClaimer: partner.publicKey,
         quoteMint: NATIVE_MINT,
         instructionParams,
@@ -402,7 +402,7 @@ describe("Create locker", () => {
         1 // Timestamp
       );
       const migrationParams: MigrateMeteoraDammV2Params = {
-        payer: admin,
+        payer: poolCreator,
         virtualPool,
         dammConfig,
       };

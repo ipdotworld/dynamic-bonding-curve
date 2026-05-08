@@ -854,6 +854,7 @@ dependencies = [
  "const-crypto",
  "damm-v2",
  "dynamic-amm",
+ "ip-owner-vault",
  "locker",
  "mpl-token-metadata",
  "num",
@@ -1112,6 +1113,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "ip-owner-vault"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "bytemuck",
+ "static_assertions",
 ]
 
 [[package]]

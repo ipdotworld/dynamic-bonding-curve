@@ -23,10 +23,10 @@ use crate::{
     params::fee_parameters::to_bps,
     safe_math::{SafeCast, SafeMath},
     state::{
-        LiquidityDistribution, LiquidityDistributionItem, MigrationFeeOption, MigrationOption,
+        LiquidityDistributionItem, MigrationFeeOption, MigrationOption,
         MigrationProgress, PoolConfig, TokenType, VirtualPool,
     },
-    PoolError,
+    EvtMigrateDammV2, PoolError,
 };
 use migration_handler::MigratedCollectFeeMode;
 
@@ -325,6 +325,8 @@ impl<'info> MigrateDammV2Ctx<'info> {
         Ok(())
     }
 
+    /// Retained for potential future use; not called after A-03 single-position migration.
+    #[allow(dead_code)]
     fn set_authority_for_position(
         &self,
         position_nft_account: &AccountInfo<'info>,
@@ -347,6 +349,8 @@ impl<'info> MigrateDammV2Ctx<'info> {
         Ok(())
     }
 
+    /// Retained for potential future use; not called after A-03 single-position migration.
+    #[allow(dead_code)]
     fn create_second_position(&self, total_liquidity: u128) -> Result<()> {
         let pool_authority_seeds = pool_authority_seeds!(BUMP);
         msg!("create position");
@@ -500,6 +504,17 @@ fn validate_config_key(
 pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
     ctx: Context<'_, '_, 'c, 'info, MigrateDammV2Ctx<'info>>,
 ) -> Result<()> {
+    // Access control: payer must be pool creator or config fee_claimer
+    {
+        let pool = ctx.accounts.virtual_pool.load()?;
+        let config = ctx.accounts.config.load()?;
+        require!(
+            ctx.accounts.payer.key() == pool.creator
+                || ctx.accounts.payer.key() == config.fee_claimer,
+            PoolError::Unauthorized
+        );
+    }
+
     let current_timestamp = Clock::get()?.unix_timestamp as u64;
 
     let config = ctx.accounts.config.load()?;
@@ -584,33 +599,15 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
         excluded_protocol_fee_migration_quote_amount,
     )?;
 
-    let LiquidityDistribution {
-        partner: partner_liquidity_distribution,
-        creator: creator_liquidity_distribution,
-    } = config.get_liquidity_distribution(distributable_liquidity)?;
-
-    let (
-        first_position_liquidity_distribution,
-        // we need mut to adjust second_position_liquidity_distribution later
-        mut second_position_liquidity_distribution,
-        first_position_owner,
-        second_position_owner,
-    ) = if partner_liquidity_distribution.get_total_liquidity()?
-        > creator_liquidity_distribution.get_total_liquidity()?
-    {
-        (
-            partner_liquidity_distribution,
-            creator_liquidity_distribution,
-            config.fee_claimer,
-            virtual_pool.creator,
-        )
-    } else {
-        (
-            creator_liquidity_distribution,
-            partner_liquidity_distribution,
-            virtual_pool.creator,
-            config.fee_claimer,
-        )
+    // A-03: Single LP position with 100% permanent lock owned by pool_authority.
+    // Partner/creator split replaced by a single fully-locked position.
+    // pool_authority (IPWorld) controls the position; no set_authority transfer occurs.
+    let first_position_liquidity_distribution = LiquidityDistributionItem {
+        unlocked_liquidity: 0,
+        permanent_locked_liquidity: distributable_liquidity,
+        vested_liquidity: 0,
+        permanent_locked_liquidity_percentage: 100,
+        liquidity_vesting_info: Default::default(),
     };
 
     // --- Step 6: Remove transfer hook before DAMM v2 migration ---
@@ -687,12 +684,8 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
         )?;
     }
 
-    msg!("transfer ownership of the first position");
-    ctx.accounts.set_authority_for_position(
-        &ctx.accounts.first_position_nft_account.to_account_info(),
-        first_position_owner,
-        const_pda::pool_authority::BUMP,
-    )?;
+    // A-03: Do NOT transfer NFT ownership — pool_authority retains ownership of the
+    // single permanently-locked position. IPWorld controls it via pool_authority PDA.
 
     // reload quote reserve and base reserve
     ctx.accounts.quote_vault.reload()?;
@@ -703,67 +696,17 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
     let deposited_quote_amount =
         initial_quote_vault_amount.safe_sub(ctx.accounts.quote_vault.amount)?;
 
-    let leftover_migration_base_amount =
+    // A-03: leftover amounts computed for accounting only; they remain in vaults for
+    // protocol claim. Prefixed with _ to suppress unused-variable lint since they are
+    // referenced in comments and may be needed for future assertion logic.
+    let _leftover_migration_base_amount =
         excluded_protocol_fee_migration_base_amount.safe_sub(deposited_base_amount)?;
 
-    let leftover_migration_quote_amount =
+    let _leftover_migration_quote_amount =
         excluded_protocol_fee_migration_quote_amount.safe_sub(deposited_quote_amount)?;
 
-    let liquidity_for_second_position = {
-        let damm_pool_loader: AccountLoader<'_, damm_v2::accounts::Pool> =
-            AccountLoader::try_from(ctx.accounts.pool.account_info())?;
-        let damm_pool = damm_pool_loader.load()?;
-        liquidity_handler.calculate_liquidity_delta(
-            leftover_migration_base_amount,
-            leftover_migration_quote_amount,
-            damm_pool.token_a_amount,
-            damm_pool.token_b_amount,
-            damm_pool.liquidity,
-        )?
-    };
-
-    if liquidity_for_second_position > 0 {
-        second_position_liquidity_distribution.adjust_liquidity(liquidity_for_second_position)?;
-
-        msg!("create second position");
-
-        ctx.accounts
-            .create_second_position(liquidity_for_second_position)?;
-
-        let Some(second_position) = ctx
-            .accounts
-            .second_position
-            .as_ref()
-            .map(|acc| acc.to_account_info())
-        else {
-            return Err(PoolError::InvalidAccount.into());
-        };
-
-        let Some(second_position_nft_account) = ctx
-            .accounts
-            .second_position_nft_account
-            .as_ref()
-            .map(|acc| acc.to_account_info())
-        else {
-            return Err(PoolError::InvalidAccount.into());
-        };
-
-        if second_position_liquidity_distribution.get_total_locked_liquidity()? > 0 {
-            ctx.accounts.lock_liquidity_position(
-                &second_position_liquidity_distribution,
-                &second_position,
-                &second_position_nft_account,
-                current_timestamp,
-            )?;
-        }
-
-        msg!("set authority for second position");
-        ctx.accounts.set_authority_for_position(
-            &second_position_nft_account,
-            second_position_owner,
-            const_pda::pool_authority::BUMP,
-        )?;
-    }
+    // A-03: Second position creation removed. All liquidity is in a single permanently-locked
+    // position owned by pool_authority. Leftover amounts remain in vaults for protocol claim.
 
     virtual_pool.update_after_create_pool();
 
@@ -800,7 +743,12 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
 
     virtual_pool.set_migration_progress(MigrationProgress::CreatedPool.into());
 
-    // TODO emit event
+    emit!(EvtMigrateDammV2 {
+        pool: ctx.accounts.virtual_pool.key(),
+        config: ctx.accounts.config.key(),
+        damm_v2_pool: ctx.accounts.pool.key(),
+        timestamp: current_timestamp,
+    });
 
     Ok(())
 }

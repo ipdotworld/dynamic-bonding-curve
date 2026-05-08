@@ -5,12 +5,94 @@ use crate::{
     constants::{BASIS_POINT_MAX, ONE_Q64},
     params::swap::TradeDirection,
     safe_math::SafeMath,
+    state::config::FEE_SHARE_PRECISION,
     state::CollectFeeMode,
     state::DynamicFeeConfig,
     u128x128_math::Rounding,
-    utils_math::safe_shl_div_cast,
+    utils_math::{safe_mul_div_cast_u64, safe_shl_div_cast},
     PoolError,
 };
+
+// =============================================================================
+// IPWorld fee distribution helpers (SPEC-DBC-004 Phase 2 — REQ-S-003;
+// Phase 3 reduced quote distribution to 3 recipients — REQ-I-001)
+//
+// These functions are the canonical recipient-distribution helpers used by
+// `apply_swap_result` (state/virtual_pool.rs) and `ix_harvest`
+// (instructions/harvest/ix_harvest.rs). They were previously inlined in both
+// call sites; relocating them here removes duplication and gives the test
+// module a single source of truth.
+//
+// Phase 3 (REQ-I-001) reduced the quote distribution from 5-way to 4-way by
+// removing the `creator_share` parameter and the corresponding `creator`
+// recipient bucket. The IPWorld SELL fee model is now: ip_owner + airdrop +
+// referral (immediate, handled outside) + treasury (remainder).
+//
+// Both functions preserve the existing rounding semantics (Rounding::Down for
+// each component, treasury/ip_treasury absorbs any dust from the subtraction)
+// so the post-refactor swap output is byte-identical to the prior inline code.
+// =============================================================================
+
+/// Distributes a SELL-side (quote) fee among three recipients (4-way model;
+/// referral is handled outside this function — see `apply_swap_result`).
+///
+/// Returns `(ip_owner, airdrop, treasury)` where
+/// `ip_owner + airdrop + treasury == distributable`.
+///
+/// # Arguments
+/// * `distributable` — total quote fee available for distribution (already
+///   excludes any pre-paid referral cut).
+/// * `ip_owner_share` — IP owner share, denominated in `FEE_SHARE_PRECISION`.
+/// * `airdrop_share` — airdrop pool share, denominated in `FEE_SHARE_PRECISION`.
+pub(crate) fn distribute_quote_fee(
+    distributable: u64,
+    ip_owner_share: u32,
+    airdrop_share: u32,
+) -> Result<(u64, u64, u64)> {
+    let precision = FEE_SHARE_PRECISION as u64;
+
+    let ip_owner: u64 = safe_mul_div_cast_u64(
+        distributable,
+        ip_owner_share as u64,
+        precision,
+        Rounding::Down,
+    )?;
+
+    let airdrop: u64 = safe_mul_div_cast_u64(
+        distributable,
+        airdrop_share as u64,
+        precision,
+        Rounding::Down,
+    )?;
+
+    let treasury = distributable.safe_sub(ip_owner)?.safe_sub(airdrop)?;
+
+    Ok((ip_owner, airdrop, treasury))
+}
+
+/// Distributes a BUY-side (base) fee between two recipients.
+///
+/// Returns `(token_airdrop, ip_treasury)` where
+/// `token_airdrop + ip_treasury == total_fee`.
+///
+/// # Arguments
+/// * `total_fee` — total base fee available for distribution.
+/// * `token_airdrop_share` — token airdrop pool share, denominated in
+///   `FEE_SHARE_PRECISION`. Treasury gets the remainder (no rounding loss).
+pub(crate) fn distribute_base_fee(total_fee: u64, token_airdrop_share: u32) -> Result<(u64, u64)> {
+    let precision = FEE_SHARE_PRECISION as u64;
+
+    let token_airdrop: u64 = safe_mul_div_cast_u64(
+        total_fee,
+        token_airdrop_share as u64,
+        precision,
+        Rounding::Down,
+    )?;
+
+    let ip_treasury = total_fee.safe_sub(token_airdrop)?;
+
+    Ok((token_airdrop, ip_treasury))
+}
 
 /// Encodes all results of swapping
 #[derive(Debug, PartialEq)]

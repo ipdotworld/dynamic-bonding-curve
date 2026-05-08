@@ -1,5 +1,5 @@
 use std::{
-    ops::{BitAnd, BitXor},
+    ops::BitAnd,
     u128,
 };
 
@@ -18,7 +18,7 @@ use crate::{
     params::swap::TradeDirection,
     safe_math::SafeMath,
     state::{
-        fee::{FeeMode, FeeOnAmountResult, VolatilityTracker},
+        fee::{distribute_base_fee, distribute_quote_fee, FeeMode, FeeOnAmountResult, VolatilityTracker},
         PoolConfig,
     },
     u128x128_math::Rounding,
@@ -110,10 +110,13 @@ pub struct VirtualPool {
     pub protocol_base_fee: u64,
     /// protocol quote fee
     pub protocol_quote_fee: u64,
-    /// partner base fee
-    pub partner_base_fee: u64,
-    /// trading quote fee
-    pub partner_quote_fee: u64,
+    /// Padding (was `_deprecated_partner_base_fee` u64). Removed from API in
+    /// SPEC-DBC-004 Phase 2 Step 2.6; layout preserved as `u64` zero-pad to
+    /// keep on-chain account byte size unchanged. Phase 3 (INIT_SPACE recompute,
+    /// REQ-I-001) decides whether to fold this slot into a larger reserved block.
+    pub _padding_partner_base: u64,
+    /// Padding (was `_deprecated_partner_quote_fee` u64). Same rationale as above.
+    pub _padding_partner_quote: u64,
     /// current price
     pub sqrt_price: u128,
     /// Activation point
@@ -140,10 +143,6 @@ pub struct VirtualPool {
     pub metrics: PoolMetrics,
     /// The time curve is finished
     pub finish_curve_timestamp: u64,
-    /// creator base fee
-    pub creator_base_fee: u64,
-    /// creator quote fee
-    pub creator_quote_fee: u64,
     /// legacy creation fee bits, we dont use this now
     pub legacy_creation_fee_bits: u8,
     /// pool creation fee claim status
@@ -156,8 +155,16 @@ pub struct VirtualPool {
     pub _padding_1: [u8; 6],
     pub protocol_migration_base_fee_amount: u64,
     pub protocol_migration_quote_fee_amount: u64,
-    /// Padding for further use
-    pub _padding_2: [u64; 3],
+    /// IPWorld: IP owner's accumulated quote fee (SELL side)
+    pub ip_owner_quote_fee: u64,
+    /// IPWorld: airdrop accumulated quote fee (SELL side, UGC+Holder)
+    pub airdrop_quote_fee: u64,
+    /// IPWorld: token airdrop accumulated base fee (BUY side)
+    pub token_airdrop_base_fee: u64,
+    /// IPWorld: IP treasury accumulated base fee (BUY side, remainder after token_airdrop)
+    pub ip_treasury_base_fee: u64,
+    /// Reserved for future use; also keeps struct size a multiple of 16 (u128 alignment requirement)
+    pub _padding_reserved: u64,
 }
 
 const_assert_eq!(VirtualPool::INIT_SPACE, 416);
@@ -381,7 +388,7 @@ impl VirtualPool {
                     )?;
                     total_amount_in = total_amount_in.safe_add(in_amount)?;
                     current_sqrt_price = next_sqrt_price;
-                    amount_left = amount_left.safe_sub(max_amount_out.try_into().unwrap())?;
+                    amount_left = amount_left.safe_sub(max_amount_out.try_into().map_err(|_| PoolError::TypeCastFailed)?)?;
                 }
             }
         }
@@ -837,7 +844,7 @@ impl VirtualPool {
                     current_sqrt_price,
                     reference_sqrt_price,
                     config.curve[i].liquidity,
-                    Rounding::Up, // TODO check whether we should use round down or round up
+                    Rounding::Up,
                 )?;
                 if U256::from(amount_left) < max_amount_in {
                     let next_sqrt_price = get_next_sqrt_price_from_input(
@@ -916,23 +923,58 @@ impl VirtualPool {
         let old_sqrt_price = self.sqrt_price;
         self.sqrt_price = next_sqrt_price;
 
-        let PartnerAndCreatorSplitFee {
-            partner_fee,
-            creator_fee,
-        } = config.split_partner_and_creator_fee(trading_fee)?;
-        if fee_mode.fees_on_base_token {
-            self.partner_base_fee = self.partner_base_fee.safe_add(partner_fee)?;
-            self.protocol_base_fee = self.protocol_base_fee.safe_add(protocol_fee)?;
-            self.creator_base_fee = self.creator_base_fee.safe_add(creator_fee)?;
+        // IPWorld 1-stage flat fee distribution (OutputToken mode only)
+        // Recombine total fee from SwapResult components
+        let total_fee = protocol_fee
+            .safe_add(trading_fee)?
+            .safe_add(referral_fee)?;
 
-            self.metrics
-                .accumulate_fee(protocol_fee, trading_fee, true)?;
+        if fee_mode.fees_on_base_token {
+            // BUY (SOL→token): base_fee distribution
+            // token_airdrop_share% → token_airdrop_base_fee counter
+            // remainder           → ip_treasury_base_fee counter
+            // SPEC-DBC-004 Phase 2 (REQ-S-005): inline math relocated to
+            // `state::fee::distribute_base_fee`.
+            let (token_airdrop, ip_treasury) =
+                distribute_base_fee(total_fee, config.token_airdrop_share)?;
+
+            self.token_airdrop_base_fee = self.token_airdrop_base_fee.safe_add(token_airdrop)?;
+            self.ip_treasury_base_fee = self.ip_treasury_base_fee.safe_add(ip_treasury)?;
+
+            // Keep protocol_base_fee as the canonical "all protocol base fees" counter for
+            // backward-compatible withdrawal paths (claim_protocol_base_fee).
+            self.protocol_base_fee = self.protocol_base_fee.safe_add(total_fee)?;
+
+            self.metrics.accumulate_fee(total_fee, 0, true)?;
         } else {
-            self.partner_quote_fee = self.partner_quote_fee.safe_add(partner_fee)?;
-            self.protocol_quote_fee = self.protocol_quote_fee.safe_add(protocol_fee)?;
-            self.creator_quote_fee = self.creator_quote_fee.safe_add(creator_fee)?;
-            self.metrics
-                .accumulate_fee(protocol_fee, trading_fee, false)?;
+            // SELL (token→SOL): quote_fee distribution (IPWorld 4-way SELL model)
+            // ip_owner_share%   → ip_owner_quote_fee counter
+            // airdrop_share%    → airdrop_quote_fee counter
+            // referral_share%   → handled externally via swap_result.referral_fee (immediate transfer)
+            // remainder         → protocol_quote_fee counter (IPWorld treasury)
+            // SPEC-DBC-004 Phase 2 (REQ-S-005): inline math relocated to
+            // `state::fee::distribute_quote_fee`.
+            // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed; the
+            // `creator` recipient bucket is gone. Distribution is now 3-way
+            // (ip_owner + airdrop + treasury) at the helper level; referral is
+            // applied externally by subtracting `referral_fee` before calling.
+
+            // The referral portion has already been accounted for in swap_result.referral_fee
+            // (transferred immediately in the swap handler). We distribute total_fee minus that
+            // referral portion among the on-chain counters.
+            let distributable = total_fee.safe_sub(referral_fee)?;
+
+            let (ip_owner, airdrop, treasury) = distribute_quote_fee(
+                distributable,
+                config.ip_owner_share,
+                config.airdrop_share,
+            )?;
+
+            self.ip_owner_quote_fee = self.ip_owner_quote_fee.safe_add(ip_owner)?;
+            self.airdrop_quote_fee = self.airdrop_quote_fee.safe_add(airdrop)?;
+            self.protocol_quote_fee = self.protocol_quote_fee.safe_add(treasury)?;
+
+            self.metrics.accumulate_fee(treasury, distributable, false)?;
         }
 
         let actual_output_amount = if fee_mode.fees_on_input {
@@ -1045,35 +1087,22 @@ impl VirtualPool {
         Ok(amount)
     }
 
-    pub fn claim_partner_trading_fee(
-        &mut self,
-        max_base_amount: u64,
-        max_quote_amount: u64,
-    ) -> Result<(u64, u64)> {
-        let token_base_amount = self.partner_base_fee.min(max_base_amount);
-        let token_quote_amount = self.partner_quote_fee.min(max_quote_amount);
-        self.partner_base_fee = self.partner_base_fee.safe_sub(token_base_amount)?;
-        self.partner_quote_fee = self.partner_quote_fee.safe_sub(token_quote_amount)?;
-        Ok((token_base_amount, token_quote_amount))
-    }
+    // SPEC-DBC-004 Phase 2 (REQ-S-002): `claim_partner_trading_fee` removed —
+    // had zero callers post Phase 1 partner-ix Tier-2 cleanup. The deprecated
+    // partner fee fields are now `_padding_*` (byte layout preserved until
+    // Phase 3 INIT_SPACE recompute).
+    //
+    // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed
+    // alongside `creator_quote_fee` and `_deprecated_creator_base_fee` fields.
+    // The creator side of the IPWorld 4-way SELL distribution is fully retired
+    // (creator_share = 0 implicit); creator earnings flow exclusively via the
+    // existing `creator_withdraw_surplus` path.
 
-    pub fn claim_creator_trading_fee(
-        &mut self,
-        max_base_amount: u64,
-        max_quote_amount: u64,
-    ) -> Result<(u64, u64)> {
-        let token_base_amount = self.creator_base_fee.min(max_base_amount);
-        let token_quote_amount = self.creator_quote_fee.min(max_quote_amount);
-        self.creator_base_fee = self.creator_base_fee.safe_sub(token_base_amount)?;
-        self.creator_quote_fee = self.creator_quote_fee.safe_sub(token_quote_amount)?;
-        Ok((token_base_amount, token_quote_amount))
-    }
-
+    /// Returns total base fees that must remain in the vault and cannot be migrated.
+    /// Post Phase 3 (REQ-I-001): only `protocol_base_fee` is accumulated; the
+    /// partner-deprecated and creator-deprecated terms have both been removed.
     pub fn get_protocol_and_trading_base_fee(&self) -> Result<u64> {
-        Ok(self
-            .partner_base_fee
-            .safe_add(self.protocol_base_fee)?
-            .safe_add(self.creator_base_fee)?)
+        Ok(self.protocol_base_fee)
     }
 
     pub fn is_curve_complete(&self, migration_threshold: u64) -> bool {
@@ -1142,7 +1171,7 @@ impl VirtualPool {
         self.migration_fee_withdraw_status.bitand(mask) == 0
     }
     pub fn update_withdraw_migration_fee(&mut self, mask: u8) {
-        self.migration_fee_withdraw_status = self.migration_fee_withdraw_status.bitxor(mask);
+        self.migration_fee_withdraw_status = self.migration_fee_withdraw_status | mask;
     }
 
     pub fn get_migration_progress(&self) -> Result<MigrationProgress> {
@@ -1170,7 +1199,7 @@ impl VirtualPool {
     pub fn update_legacy_creation_fee_claimed(&mut self) {
         self.legacy_creation_fee_bits = self
             .legacy_creation_fee_bits
-            .bitxor(LEGACY_CREATION_FEE_CLAIMED_MASK);
+            | LEGACY_CREATION_FEE_CLAIMED_MASK;
     }
 
     pub fn eligible_to_claim_partner_pool_creation_fee(&self) -> bool {
@@ -1182,7 +1211,7 @@ impl VirtualPool {
     pub fn update_partner_pool_creation_fee_claimed(&mut self) {
         self.creation_fee_bits = self
             .creation_fee_bits
-            .bitxor(PARTNER_CREATION_FEE_CLAIMED_MASK)
+            | PARTNER_CREATION_FEE_CLAIMED_MASK
     }
 
     pub fn eligible_to_claim_protocol_pool_creation_fee(&self) -> bool {
@@ -1194,7 +1223,7 @@ impl VirtualPool {
     pub fn update_protocol_pool_creation_fee_claimed(&mut self) {
         self.creation_fee_bits = self
             .creation_fee_bits
-            .bitxor(PROTOCOL_CREATION_FEE_CLAIMED_MASK)
+            | PROTOCOL_CREATION_FEE_CLAIMED_MASK
     }
 
     pub fn save_protocol_liquidity_migration_fee(&mut self, base_amount: u64, quote_amount: u64) {

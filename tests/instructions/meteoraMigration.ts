@@ -7,6 +7,7 @@ import {
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
+  SystemProgram,
   SYSVAR_RENT_PUBKEY,
   TransactionInstruction,
 } from "@solana/web3.js";
@@ -18,6 +19,7 @@ import {
   deriveDammPoolAddress,
   deriveLpMintAddress,
   deriveMetadataAccount,
+  deriveMigrationDammV2MetadataAddress,
   deriveMigrationMetadataAddress,
   derivePoolAuthority,
   deriveProtocolFeeAddress,
@@ -39,23 +41,28 @@ export type CreateMeteoraMetadata = {
   config: PublicKey;
 };
 
+// DAMM v1 migration is disabled (A-01). This function now creates the DAMM v2
+// migration metadata instead, which is the only supported migration path.
 export async function createMeteoraMetadata(
   svm: LiteSVM,
   program: VirtualCurveProgram,
   params: CreateMeteoraMetadata
 ): Promise<PublicKey> {
   const { payer, virtualPool, config } = params;
+  const migrationMetadata = deriveMigrationDammV2MetadataAddress(virtualPool);
   const transaction = await program.methods
-    .migrationMeteoraDammCreateMetadata()
+    .migrationDammV2CreateMetadata()
     .accountsPartial({
       virtualPool,
       config,
+      migrationMetadata,
       payer: payer.publicKey,
+      systemProgram: SystemProgram.programId,
     })
     .transaction();
   sendTransactionMaybeThrow(svm, transaction, [payer]);
 
-  return deriveMigrationMetadataAddress(virtualPool);
+  return migrationMetadata;
 }
 
 export type MigrateMeteoraParams = {

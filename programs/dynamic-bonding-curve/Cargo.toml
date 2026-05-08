@@ -15,8 +15,6 @@ no-log-ix-name = []
 cpi = ["no-entrypoint"]
 default = []
 local = []
-skip-launch-auth = []
-skip-trade-auth = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
@@ -38,6 +36,8 @@ protocol-zap = { git = "https://github.com/MeteoraAg/zap-program", rev = "064c58
 unchecked_account = { git = "https://github.com/MeteoraAg/anchor-patches.git", rev = "ed053964b49b2832beb9891be0f5b353e2317777" }
 spl-transfer-hook-interface = "0.9"
 spl-tlv-account-resolution = "0.9"
+# SPEC-DBC-004 Phase 6 (REQ-I-003): IP owner fee → vesting vault via CPI.
+ip-owner-vault = { path = "../ip-owner-vault", features = ["cpi"] }
 
 [dev-dependencies]
 proptest = "1.2.0"

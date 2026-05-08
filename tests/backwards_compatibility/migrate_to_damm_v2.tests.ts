@@ -63,7 +63,6 @@ describe("Backwards compatibility - DAMMv2 migration", () => {
   it("createConfigSplTokenForSwapDammv2", async () => {
     const params: CreateConfigForSwapParams = {
       payer: partner,
-      leftoverReceiver: partner.publicKey,
       feeClaimer: partner.publicKey,
       quoteMint: NATIVE_MINT,
     };

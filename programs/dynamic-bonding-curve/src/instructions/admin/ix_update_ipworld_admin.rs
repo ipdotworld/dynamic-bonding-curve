@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::IpworldState;
+use crate::PoolError;
+use crate::event::EvtAdminProposed;
 
 #[derive(Accounts)]
 pub struct UpdateIpworldAdminCtx<'info> {
@@ -21,6 +23,12 @@ pub fn handle_update_ipworld_admin(
     ctx: Context<UpdateIpworldAdminCtx>,
     new_admin: Pubkey,
 ) -> Result<()> {
-    ctx.accounts.ipworld_state.admin = new_admin;
+    require!(new_admin != Pubkey::default(), PoolError::InvalidAdmin);
+    let old_admin = ctx.accounts.ipworld_state.admin;
+    ctx.accounts.ipworld_state.pending_admin = new_admin;
+    emit!(EvtAdminProposed {
+        old_admin,
+        pending_admin: new_admin,
+    });
     Ok(())
 }

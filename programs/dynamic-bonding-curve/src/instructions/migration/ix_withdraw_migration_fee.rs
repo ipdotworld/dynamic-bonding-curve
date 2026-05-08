@@ -5,7 +5,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use crate::{
     const_pda,
     state::{
-        MigrationFeeDistribution, PoolConfig, VirtualPool, CREATOR_MIGRATION_FEE_MASK,
+        PoolConfig, VirtualPool, CREATOR_MIGRATION_FEE_MASK,
         PARTNER_MIGRATION_FEE_MASK,
     },
     token::transfer_token_from_pool_authority,
@@ -69,7 +69,7 @@ pub enum SenderFlag {
 
 pub fn handle_withdraw_migration_fee<'c: 'info, 'info>(
     ctx: Context<'_, '_, 'c, 'info, WithdrawMigrationFeeCtx<'info>>,
-    flag: u8, // 0 as partner and 1 as creator
+    flag: u8, // retained for interface compatibility; only flag=0 (operator) is valid post A-04
 ) -> Result<()> {
     let config = ctx.accounts.config.load()?;
     let mut pool = ctx.accounts.virtual_pool.load_mut()?;
@@ -79,41 +79,44 @@ pub fn handle_withdraw_migration_fee<'c: 'info, 'info>(
         pool.is_curve_complete(config.migration_quote_threshold),
         PoolError::NotPermitToDoThisAction
     );
-    let MigrationFeeDistribution {
-        creator_migration_fee,
-        partner_migration_fee,
-    } = config.get_migration_fee_distribution()?;
 
+    // A-04: Partner/creator split removed. The entire migration fee goes to the caller
+    // (operator/treasury). Both masks must be unclaimed for the full withdrawal.
     let sender_flag = SenderFlag::try_from(flag).map_err(|_| PoolError::TypeCastFailed)?;
-    let fee = if sender_flag == SenderFlag::Partner {
-        require!(
-            ctx.accounts.sender.key() == config.fee_claimer,
-            PoolError::NotPermitToDoThisAction
-        );
-        let mask = PARTNER_MIGRATION_FEE_MASK;
-        // Ensure the partner has never been withdrawn
-        require!(
-            pool.eligible_to_withdraw_migration_fee(mask),
-            PoolError::MigrationFeeHasBeenWithdraw
-        );
-        // update partner withdraw migration fee
-        pool.update_withdraw_migration_fee(mask);
-        partner_migration_fee
-    } else {
-        require!(
-            ctx.accounts.sender.key() == pool.creator,
-            PoolError::NotPermitToDoThisAction
-        );
-        let mask = CREATOR_MIGRATION_FEE_MASK;
-        // Ensure the creator has never been withdrawn
-        require!(
-            pool.eligible_to_withdraw_migration_fee(mask),
-            PoolError::MigrationFeeHasBeenWithdraw
-        );
-        // update creator withdraw migration fee
-        pool.update_withdraw_migration_fee(mask);
-        creator_migration_fee
+
+    // Only the operator (fee_claimer) may call this post A-04
+    require!(
+        sender_flag == SenderFlag::Partner,
+        PoolError::NotPermitToDoThisAction
+    );
+    require!(
+        ctx.accounts.sender.key() == config.fee_claimer,
+        PoolError::NotPermitToDoThisAction
+    );
+
+    // Collect total migration fee (partner + creator shares combined)
+    let total_migration_fee = {
+        let crate::state::MigrationFeeDistribution {
+            creator_migration_fee,
+            partner_migration_fee,
+        } = config.get_migration_fee_distribution()?;
+        partner_migration_fee.checked_add(creator_migration_fee)
+            .ok_or(PoolError::MathOverflow)?
     };
+
+    // Ensure neither portion has been withdrawn yet
+    require!(
+        pool.eligible_to_withdraw_migration_fee(PARTNER_MIGRATION_FEE_MASK),
+        PoolError::MigrationFeeHasBeenWithdraw
+    );
+    require!(
+        pool.eligible_to_withdraw_migration_fee(CREATOR_MIGRATION_FEE_MASK),
+        PoolError::MigrationFeeHasBeenWithdraw
+    );
+
+    // Mark both portions as withdrawn
+    pool.update_withdraw_migration_fee(PARTNER_MIGRATION_FEE_MASK);
+    pool.update_withdraw_migration_fee(CREATOR_MIGRATION_FEE_MASK);
 
     transfer_token_from_pool_authority(
         ctx.accounts.pool_authority.to_account_info(),
@@ -121,13 +124,13 @@ pub fn handle_withdraw_migration_fee<'c: 'info, 'info>(
         &ctx.accounts.quote_vault,
         ctx.accounts.token_quote_account.to_account_info(),
         &ctx.accounts.token_quote_program,
-        fee,
+        total_migration_fee,
         ctx.remaining_accounts,
     )?;
 
     emit_cpi!(EvtWithdrawMigrationFee {
         pool: ctx.accounts.virtual_pool.key(),
-        fee,
+        fee: total_migration_fee,
         flag
     });
     Ok(())

@@ -17,6 +17,7 @@ import {
   PartnerMetadata,
   Pool,
   PoolConfig,
+  TokenVerification,
   VirtualCurveProgram,
   VirtualPoolMetadata,
 } from "./types";
@@ -115,4 +116,16 @@ export function getVaultAccount(svm: LiteSVM, vault: PublicKey): DynamicVault {
   const account = svm.getAccount(vault);
   const program = createVaultProgram();
   return program.coder.accounts.decode("vault", Buffer.from(account.data));
+}
+
+export function getTokenVerification(
+  svm: LiteSVM,
+  program: VirtualCurveProgram,
+  tokenVerification: PublicKey
+): TokenVerification {
+  const account = svm.getAccount(tokenVerification);
+  return program.coder.accounts.decode(
+    "tokenVerification",
+    Buffer.from(account.data)
+  );
 }

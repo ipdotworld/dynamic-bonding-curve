@@ -1,4 +1,4 @@
-#![allow(unexpected_cfgs)]
+// cfg attributes are validated by Rust compiler — do not suppress warnings
 
 use anchor_lang::prelude::*;
 
@@ -77,22 +77,55 @@ pub mod dynamic_bonding_curve {
         instructions::handle_claim_protocol_fee(ctx, max_base_amount, max_quote_amount)
     }
 
-    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ClaimProtocolFee))]
-    pub fn claim_protocol_pool_creation_fee(
-        ctx: Context<ClaimProtocolPoolCreationFeeCtx>,
+    /// Verified IP owner claims their accumulated SOL (quote) fees.
+    /// Requires a valid TokenVerification PDA created by verify_token.
+    pub fn claim_ip_owner_fee<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, ClaimIpOwnerFeeCtx<'info>>,
+        max_amount: u64,
     ) -> Result<()> {
-        instructions::handle_claim_protocol_pool_creation_fee(ctx)
+        instructions::handle_claim_ip_owner_fee(ctx, max_amount)
     }
 
-    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ZapProtocolFee))]
-    pub fn zap_protocol_fee<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, ZapProtocolFee<'info>>, max_amount: u64) -> Result<()> {
-        instructions::handle_zap_protocol_fee(ctx, max_amount)
+    /// Operator claims accumulated airdrop fees: SOL (quote) and token (base).
+    /// Backend distributes these to UGC creators and holders off-chain.
+    /// Authorization: Operator with `ClaimAirdrop` permission (REQ-I-004 Phase 5.4).
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ClaimAirdrop))]
+    pub fn claim_airdrop_fee<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, ClaimAirdropFeeCtx<'info>>,
+        max_quote_amount: u64,
+        max_base_amount: u64,
+    ) -> Result<()> {
+        instructions::handle_claim_airdrop_fee(ctx, max_quote_amount, max_base_amount)
     }
+
+    /// Operator drains the token-only airdrop fee accumulator (SPEC-DBC-004 REQ-S-007 Phase 5.5).
+    /// Token (base) variant of `claim_airdrop_fee` for cadence-independent backend distribution.
+    /// Authorization: Operator with `ClaimAirdrop` permission.
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ClaimAirdrop))]
+    pub fn claim_token_airdrop_fee<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, ClaimTokenAirdropFeeCtx<'info>>,
+        max_base_amount: u64,
+    ) -> Result<()> {
+        instructions::handle_claim_token_airdrop_fee(ctx, max_base_amount)
+    }
+
+    /// IP treasury address claims accumulated token (base) fees.
+    /// Requires ip_treasury to be set on the TokenVerification PDA.
+    pub fn claim_ip_treasury_fee<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, ClaimIpTreasuryFeeCtx<'info>>,
+        max_amount: u64,
+    ) -> Result<()> {
+        instructions::handle_claim_ip_treasury_fee(ctx, max_amount)
+    }
+
+    // claim_protocol_pool_creation_fee removed in A-04 (partner system removal)
+    // zap_protocol_fee removed in A-04 (partner system removal)
 
     /// IPWORLD ADMIN FUNCTIONS ///
 
     /// One-shot: creates the platform-wide IpworldState PDA.
     /// Payer becomes initial admin. Authority is the backend KMS key.
+    #[access_control(is_admin(ctx.accounts.payer.key))]
     pub fn init_ipworld_state(
         ctx: Context<InitIpworldStateCtx>,
         authority: Pubkey,
@@ -100,7 +133,7 @@ pub mod dynamic_bonding_curve {
         instructions::handle_init_ipworld_state(ctx, authority)
     }
 
-    /// Rotates the backend signing key. Admin-only.
+    /// Proposes authority rotation to a new key. Admin-only. New key must call accept_ipworld_authority.
     pub fn update_ipworld_authority(
         ctx: Context<UpdateIpworldAuthorityCtx>,
         new_authority: Pubkey,
@@ -108,12 +141,62 @@ pub mod dynamic_bonding_curve {
         instructions::handle_update_ipworld_authority(ctx, new_authority)
     }
 
-    /// Transfers admin rights to a new key (e.g. wallet → multisig). Admin-only.
+    /// Proposes admin transfer to a new key. Admin-only. New key must call accept_ipworld_admin.
     pub fn update_ipworld_admin(
         ctx: Context<UpdateIpworldAdminCtx>,
         new_admin: Pubkey,
     ) -> Result<()> {
         instructions::handle_update_ipworld_admin(ctx, new_admin)
+    }
+
+    /// Accepts pending admin transfer. Must be called by the pending admin.
+    pub fn accept_ipworld_admin(
+        ctx: Context<AcceptIpworldAdminCtx>,
+    ) -> Result<()> {
+        instructions::handle_accept_ipworld_admin(ctx)
+    }
+
+    /// Accepts pending authority rotation. Must be called by the pending authority.
+    pub fn accept_ipworld_authority(
+        ctx: Context<AcceptIpworldAuthorityCtx>,
+    ) -> Result<()> {
+        instructions::handle_accept_ipworld_authority(ctx)
+    }
+
+    /// Verifies the IP owner for a pool via Ed25519-signed backend authorization.
+    /// Creates a TokenVerification PDA recording the ip_owner address.
+    pub fn verify_token(ctx: Context<VerifyTokenCtx>) -> Result<()> {
+        instructions::handle_verify_token(ctx)
+    }
+
+    /// Proposes a transfer of IP owner role to a new wallet (backend Ed25519 auth). V-03.
+    pub fn transfer_ip_owner(ctx: Context<TransferIpOwnerCtx>) -> Result<()> {
+        instructions::handle_transfer_ip_owner(ctx)
+    }
+
+    /// Accepts a pending IP owner transfer. Must be called by the current ip_owner. V-03.
+    pub fn accept_ip_owner(ctx: Context<AcceptIpOwnerCtx>) -> Result<()> {
+        instructions::handle_accept_ip_owner(ctx)
+    }
+
+    /// Sets the IP treasury address on a TokenVerification PDA (one-time, backend Ed25519 auth). E-01.
+    pub fn set_ip_treasury(ctx: Context<SetIpTreasuryCtx>) -> Result<()> {
+        instructions::handle_set_ip_treasury(ctx)
+    }
+
+    /// Proposes a new referral wallet (backend Ed25519 auth). E-02.
+    pub fn set_referral(ctx: Context<SetReferralCtx>) -> Result<()> {
+        instructions::handle_set_referral(ctx)
+    }
+
+    /// Accepts a pending referral change. Must be called by the current ip_owner. E-02.
+    pub fn accept_referral(ctx: Context<AcceptReferralCtx>) -> Result<()> {
+        instructions::handle_accept_referral(ctx)
+    }
+
+    /// Links a token pool to an IPA identifier (backend Ed25519 auth). E-03.
+    pub fn link_token_to_ip(ctx: Context<LinkTokenToIpCtx>) -> Result<()> {
+        instructions::handle_link_token_to_ip(ctx)
     }
 
     /// PARTNER FUNCTIONS ///
@@ -131,27 +214,9 @@ pub mod dynamic_bonding_curve {
         instructions::handle_create_config(ctx, config_parameters)
     }
 
-    #[access_control(is_partner_fee_claimer(&ctx.accounts.config, ctx.accounts.fee_claimer.key))]
-    pub fn claim_trading_fee<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, ClaimTradingFeesCtx<'info>>,
-        max_amount_a: u64,
-        max_amount_b: u64,
-    ) -> Result<()> {
-        instructions::handle_claim_trading_fee(ctx, max_amount_a, max_amount_b)
-    }
-
-    #[access_control(is_partner_fee_claimer(&ctx.accounts.config, ctx.accounts.fee_claimer.key))]
-    pub fn claim_partner_pool_creation_fee(
-        ctx: Context<ClaimPartnerPoolCreationFeeCtx>,
-    ) -> Result<()> {
-        instructions::handle_claim_partner_pool_creation_fee(ctx)
-    }
-
-    // withdraw surplus on quote token
-    #[access_control(is_partner_fee_claimer(&ctx.accounts.config, ctx.accounts.fee_claimer.key))]
-    pub fn partner_withdraw_surplus<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, PartnerWithdrawSurplusCtx<'info>>) -> Result<()> {
-        instructions::handle_partner_withdraw_surplus(ctx)
-    }
+    // claim_trading_fee removed in A-04 (partner system removal)
+    // claim_partner_pool_creation_fee removed in A-04 (partner system removal)
+    // partner_withdraw_surplus removed in A-04 (partner system removal)
 
     /// POOL CREATOR FUNCTIONS ////
     pub fn initialize_virtual_pool_with_spl_token<'c: 'info, 'info>(
@@ -176,14 +241,10 @@ pub mod dynamic_bonding_curve {
         instructions::handle_create_virtual_pool_metadata(ctx, metadata)
     }
 
-    #[access_control(is_pool_creator(&ctx.accounts.pool, ctx.accounts.creator.key))]
-    pub fn claim_creator_trading_fee<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, ClaimCreatorTradingFeesCtx<'info>>,
-        max_base_amount: u64,
-        max_quote_amount: u64,
-    ) -> Result<()> {
-        instructions::handle_claim_creator_trading_fee(ctx, max_base_amount, max_quote_amount)
-    }
+    // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed.
+    // The creator side of the SELL fee distribution is gone (creator_share field
+    // and creator_quote_fee accumulator both deleted). Creator earnings flow
+    // exclusively via `creator_withdraw_surplus` below.
 
     // withdraw surplus on quote token
     #[access_control(is_pool_creator(&ctx.accounts.virtual_pool, ctx.accounts.creator.key))]
@@ -237,31 +298,6 @@ pub mod dynamic_bonding_curve {
         instructions::handle_withdraw_leftover(ctx)
     }
 
-    /// migrate damm v1
-    pub fn migration_meteora_damm_create_metadata<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, MigrationMeteoraDammCreateMetadataCtx<'info>>,
-    ) -> Result<()> {
-        instructions::handle_migration_meteora_damm_create_metadata(ctx)
-    }
-
-    pub fn migrate_meteora_damm<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, MigrateMeteoraDammCtx<'info>>,
-    ) -> Result<()> {
-        instructions::handle_migrate_meteora_damm(ctx)
-    }
-
-    pub fn migrate_meteora_damm_lock_lp_token<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, MigrateMeteoraDammLockLpTokenCtx<'info>>,
-    ) -> Result<()> {
-        instructions::handle_migrate_meteora_damm_lock_lp_token(ctx)
-    }
-
-    pub fn migrate_meteora_damm_claim_lp_token<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, MigrateMeteoraDammClaimLpTokenCtx<'info>>,
-    ) -> Result<()> {
-        instructions::handle_migrate_meteora_damm_claim_lp_token(ctx)
-    }
-
     // migrate damm v2
     #[deprecated(
         since = "0.1.7",
@@ -277,5 +313,20 @@ pub mod dynamic_bonding_curve {
         ctx: Context<'_, '_, 'c, 'info, MigrateDammV2Ctx<'info>>,
     ) -> Result<()> {
         instructions::handle_migrate_damm_v2(ctx)
+    }
+
+    /// Permissionless instruction to harvest accumulated LP fees from a DAMM v2 pool.
+    ///
+    /// After graduation, all liquidity migrates to DAMM v2 and is permanently locked.
+    /// LP fees (SOL + token) accumulate in DAMM v2. Anyone (crank/bot) can call this
+    /// to collect fees and distribute them using the same ratios as bonding curve swaps.
+    ///
+    /// Requirements:
+    ///   - pool must be in MigrationProgress::CreatedPool state
+    ///   - permissionless: no signer authority check on payer
+    pub fn harvest<'c: 'info, 'info>(
+        ctx: Context<'_, '_, 'c, 'info, HarvestCtx<'info>>,
+    ) -> Result<()> {
+        instructions::handle_harvest(ctx)
     }
 }

@@ -27,7 +27,8 @@ import { VirtualCurveProgram } from "./utils/types";
 import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 
-describe("Claim protocol liquidity migration fee", () => {
+// audit: F-009 — Tier 1 deletion EvtClaimProtocolLiquidityMigrationFee
+describe.skip("Claim protocol liquidity migration fee", () => {
   let svm: LiteSVM;
   let admin: Keypair;
   let operator: Keypair;
@@ -67,7 +68,7 @@ describe("Claim protocol liquidity migration fee", () => {
       customizableMigrationFeeOption,
       {
         poolFeeBps: 100,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
       },
       partner,
@@ -109,7 +110,7 @@ describe("Claim protocol liquidity migration fee", () => {
       fixedFeeBps0MigrationFeeOption,
       {
         poolFeeBps: 0,
-        collectFeeMode: 0,
+        collectFeeMode: 1,
         dynamicFee: 0,
       },
       partner,

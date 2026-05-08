@@ -389,7 +389,7 @@ export function designCurve(
   totalTokenSupply: number,
   percentageSupplyOnMigration: number,
   migrationQuoteThreshold: number,
-  migrationOption: number,
+  migrationOptionRaw: number,
   tokenBaseDecimal: number,
   tokenQuoteDecimal: number,
   creatorTradingFeePercentage: number,
@@ -407,6 +407,8 @@ export function designCurve(
     poolCreationFee?: BN;
   }
 ): ConfigParameters {
+  // MigrationOption 0 (DAMM v1) is disabled — use DammV2 (1) instead
+  const migrationOption = migrationOptionRaw === 0 ? 1 : migrationOptionRaw;
   let migrationBaseSupply = new BN(totalTokenSupply)
     .mul(new BN(percentageSupplyOnMigration * 100))
     .div(new BN(10000));
@@ -487,7 +489,7 @@ export function designCurve(
     activationType: 0,
     collectFeeMode,
     migrationOption,
-    tokenType: 0, // spl_token
+    tokenType: 1, // token2022 (spl_token pools are disabled)
     tokenDecimal: tokenBaseDecimal,
     migrationQuoteThreshold: migrationQuoteThresholdWithDecimals,
     partnerLiquidityPercentage: 0,
@@ -529,6 +531,10 @@ export function designCurve(
     migratedPoolMarketCapFeeSchedulerParams: null,
     poolCreationFee: new BN(0),
     curve,
+    ipOwnerShare: 50000,
+    airdropShare: 30000,
+    referralShare: 20000,
+    tokenAirdropShare: 50000,
   };
   return instructionParams;
 }
@@ -537,7 +543,7 @@ export function designGraphCurve(
   totalTokenSupply: number,
   initialMarketCap: number,
   migrationMarketCap: number,
-  migrationOption: number,
+  migrationOptionRaw: number,
   tokenBaseDecimal: number,
   tokenQuoteDecimal: number,
   creatorTradingFeePercentage: number,
@@ -547,6 +553,8 @@ export function designGraphCurve(
   kFactor: number,
   baseFee: BaseFee
 ): ConfigParameters {
+  // MigrationOption 0 (DAMM v1) is disabled — use DammV2 (1) instead
+  const migrationOption = migrationOptionRaw === 0 ? 1 : migrationOptionRaw;
   // 1. finding Pmax and Pmin
   let pMin = getSqrtPriceFromMarketCap(
     initialMarketCap,
@@ -653,7 +661,7 @@ export function designGraphCurve(
     activationType: 0,
     collectFeeMode,
     migrationOption,
-    tokenType: 0, // spl_token
+    tokenType: 1, // token2022 (spl_token pools are disabled)
     tokenDecimal: tokenBaseDecimal,
     migrationQuoteThreshold,
     partnerLiquidityPercentage: 0,
@@ -698,6 +706,10 @@ export function designGraphCurve(
     compoundingFeeBps: 0,
     migratedPoolMarketCapFeeSchedulerParams: null,
     curve,
+    ipOwnerShare: 50000,
+    airdropShare: 30000,
+    referralShare: 20000,
+    tokenAirdropShare: 50000,
   };
   return instructionParams;
 }
