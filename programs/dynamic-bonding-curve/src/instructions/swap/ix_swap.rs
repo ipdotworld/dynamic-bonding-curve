@@ -2,7 +2,6 @@ use std::u64;
 
 use crate::instruction::InitializeVirtualPoolWithToken2022;
 use crate::instruction::Swap as SwapInstruction;
-use crate::instruction::Swap2 as Swap2Instruction;
 use crate::math::safe_math::SafeMath;
 use crate::state::MigrationProgress;
 use crate::swap::swap_exact_in::process_swap_exact_in;
@@ -534,9 +533,9 @@ pub fn validate_single_swap_instruction<'c, 'info>(
 
 fn is_instruction_include_pool_swap(instruction: &Instruction, pool: &Pubkey) -> bool {
     let instruction_discriminator = &instruction.data[..8];
-    if instruction_discriminator.eq(SwapInstruction::DISCRIMINATOR)
-        || instruction_discriminator.eq(Swap2Instruction::DISCRIMINATOR)
-    {
+    // Single canonical `swap` entrypoint (former `swap2`; legacy `swap` wrapper removed
+    // in SPEC-DBC-AUDIT-001 Phase 8 — REQ-F-003), so only one discriminator to match.
+    if instruction_discriminator.eq(SwapInstruction::DISCRIMINATOR) {
         return instruction.accounts[2].pubkey.eq(pool);
     }
     false

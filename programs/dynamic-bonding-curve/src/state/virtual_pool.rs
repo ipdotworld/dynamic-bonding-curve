@@ -109,7 +109,11 @@ pub struct VirtualPool {
     pub base_reserve: u64,
     /// quote reserve
     pub quote_reserve: u64,
-    /// protocol base fee
+    /// Protocol base fee accumulator. SPEC-DBC-AUDIT-001 Phase 8: no longer
+    /// credited (REQ-A-001 removed the BUY double-write) nor claimed (the dead
+    /// trading leg of `claim_protocol_base_fee` was removed). Retained as a
+    /// reserved `u64` slot to preserve the `zero_copy` layout / INIT_SPACE; it is
+    /// permanently 0 on every live path (asserted by characterization tests).
     pub protocol_base_fee: u64,
     /// protocol quote fee
     pub protocol_quote_fee: u64,
@@ -957,11 +961,13 @@ impl VirtualPool {
 
             self.metrics.accumulate_fee(total_fee, 0, true)?;
         } else {
-            // SELL (token→SOL): quote_fee distribution (IPWorld 4-way SELL model)
+            // SELL (token→SOL): quote_fee distribution (IPWorld SELL model)
             // ip_owner_share%   → ip_owner_quote_fee counter
             // airdrop_share%    → airdrop_quote_fee counter
-            // referral_share%   → handled externally via swap_result.referral_fee (immediate transfer)
             // remainder         → protocol_quote_fee counter (IPWorld treasury)
+            // Any referral cut is handled externally via swap_result.referral_fee
+            // (immediate transfer, driven by `pool_fees`/`has_referral` — NOT by a
+            // config `referral_share` field, which was removed in REQ-A-005).
             // SPEC-DBC-004 Phase 2 (REQ-S-005): inline math relocated to
             // `state::fee::distribute_quote_fee`.
             // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed; the
@@ -1056,18 +1062,17 @@ impl VirtualPool {
     }
 
     pub fn claim_protocol_base_fee(&mut self, max_amount: u64) -> Result<u64> {
-        // try to claim from trading fees firstly
-        let trading_claimed_fee = self.protocol_base_fee.min(max_amount);
-        self.protocol_base_fee = self.protocol_base_fee.safe_sub(trading_claimed_fee)?;
-        let max_amount = max_amount.safe_sub(trading_claimed_fee)?;
-        // claim from migration fee
+        // SPEC-DBC-AUDIT-001 Phase 8 (F-001): the trading-fee leg was removed.
+        // After REQ-A-001 the BUY base-fee double-write to `protocol_base_fee` is
+        // gone, so `protocol_base_fee` is permanently 0 on the trading path and
+        // its claim leg was dead (always claimed 0). Only the migration base fee
+        // is claimable here.
         let migration_claimed_fee = self.protocol_migration_base_fee_amount.min(max_amount);
         self.protocol_migration_base_fee_amount = self
             .protocol_migration_base_fee_amount
             .safe_sub(migration_claimed_fee)?;
-        let total_claimed_fee = trading_claimed_fee.safe_add(migration_claimed_fee)?;
 
-        Ok(total_claimed_fee)
+        Ok(migration_claimed_fee)
     }
 
     fn claim_protocol_quote_fee(&mut self, max_amount: u64) -> Result<u64> {

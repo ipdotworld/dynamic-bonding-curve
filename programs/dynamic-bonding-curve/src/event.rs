@@ -103,13 +103,6 @@ pub struct EvtCreateConfigV2 {
     pub config_parameters: ConfigParameters,
 }
 
-/// Close claim fee operator
-#[event]
-pub struct EvtCloseClaimFeeOperator {
-    pub claim_fee_operator: Pubkey,
-    pub operator: Pubkey,
-}
-
 #[event]
 pub struct EvtInitializePool {
     pub pool: Pubkey,
@@ -172,13 +165,6 @@ pub struct EvtClaimTokenAirdropFee {
     pub timestamp: i64,
 }
 
-#[event]
-pub struct EvtClaimTradingFee {
-    pub pool: Pubkey,
-    pub token_base_amount: u64,
-    pub token_quote_amount: u64,
-}
-
 // SPEC-DBC-004 Phase 3 (REQ-I-001): `EvtClaimCreatorTradingFee` removed
 // alongside the `claim_creator_trading_fee` instruction.
 
@@ -225,22 +211,6 @@ pub struct EvtUpdatePoolCreator {
 pub struct EvtWithdrawMigrationFee {
     pub pool: Pubkey,
     pub fee: u64,
-    pub flag: u8,
-}
-
-#[event]
-pub struct EvtClaimPoolCreationFee {
-    pub pool: Pubkey,
-    pub receiver: Pubkey,
-    pub creation_fee: u64,
-}
-
-#[event]
-pub struct EvtPartnerClaimPoolCreationFee {
-    pub pool: Pubkey,
-    pub partner: Pubkey,
-    pub creation_fee: u64,
-    pub fee_receiver: Pubkey,
 }
 
 #[event]

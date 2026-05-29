@@ -838,13 +838,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dynamic-amm"
-version = "0.0.1"
-dependencies = [
- "anchor-lang",
-]
-
-[[package]]
 name = "dynamic-bonding-curve"
 version = "0.1.10"
 dependencies = [
@@ -853,16 +846,12 @@ dependencies = [
  "bytemuck",
  "const-crypto",
  "damm-v2",
- "dynamic-amm",
- "ip-owner-vault",
  "ipworld-hook",
  "locker",
- "mpl-token-metadata",
  "num",
  "num-traits",
  "num_enum",
  "proptest",
- "protocol-zap",
  "rand 0.9.2",
  "ruint",
  "spl-tlv-account-resolution 0.9.0",
@@ -1137,14 +1126,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ipworld-splitter"
-version = "0.1.0"
-dependencies = [
- "anchor-lang",
- "anchor-spl",
-]
-
-[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1176,14 +1157,6 @@ checksum = "1cfaf33c695fc6e08064efbc1f72ec937429614f25eef83af942d0e227c3a28f"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "jupiter"
-version = "0.1.0"
-source = "git+https://github.com/MeteoraAg/zap-program?rev=064c58b317b9a85f212c0de72caea286fc72fdb4#064c58b317b9a85f212c0de72caea286fc72fdb4"
-dependencies = [
- "anchor-lang",
 ]
 
 [[package]]
@@ -1323,19 +1296,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mpl-token-metadata"
-version = "5.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "989e6a3000e761d3b2d685662a3a9ee99826f9369fb033bd1bc7011b1cf02ed9"
-dependencies = [
- "borsh 0.10.3",
- "num-derive 0.3.3",
- "num-traits",
- "solana-program",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "num"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1366,17 +1326,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "num-derive"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -1546,23 +1495,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pinocchio"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b971851087bc3699b001954ad02389d50c41405ece3548cbcafc88b3e20017a"
-
-[[package]]
-name = "pinocchio-pubkey"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb0225638cadcbebae8932cb7f49cb5da7c15c21beb19f048f05a5ca7d93f065"
-dependencies = [
- "five8_const",
- "pinocchio",
- "sha2-const-stable",
-]
-
-[[package]]
 name = "polyval"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1636,21 +1568,6 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
-]
-
-[[package]]
-name = "protocol-zap"
-version = "0.1.0"
-source = "git+https://github.com/MeteoraAg/zap-program?rev=064c58b317b9a85f212c0de72caea286fc72fdb4#064c58b317b9a85f212c0de72caea286fc72fdb4"
-dependencies = [
- "borsh 0.10.3",
- "jupiter",
- "num_enum",
- "pinocchio",
- "pinocchio-pubkey",
- "ruint",
- "thiserror 2.0.12",
- "zap-sdk",
 ]
 
 [[package]]
@@ -2517,7 +2434,7 @@ dependencies = [
  "log",
  "memoffset",
  "num-bigint",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "rand 0.8.5",
  "serde",
@@ -2932,7 +2849,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b80d57478d6599d30acc31cc5ae7f93ec2361a06aefe8ea79bc81739a08af4c3"
 dependencies = [
  "bincode",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "serde",
  "serde_derive",
@@ -2965,7 +2882,7 @@ dependencies = [
  "js-sys",
  "lazy_static",
  "merlin",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "rand 0.8.5",
  "serde",
@@ -2993,7 +2910,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76fee7d65013667032d499adc3c895e286197a35a0d3a4643c80e7fd3e9969e3"
 dependencies = [
  "borsh 1.5.5",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-program",
  "spl-associated-token-account-client",
@@ -3108,7 +3025,7 @@ dependencies = [
  "borsh 1.5.5",
  "bytemuck",
  "bytemuck_derive",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-decode-error",
  "solana-msg",
@@ -3125,7 +3042,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7b28bed65356558133751cc32b48a7a5ddfc59ac4e941314630bbed1ac10532"
 dependencies = [
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-program",
  "spl-program-error-derive",
@@ -3138,7 +3055,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d39b5186f42b2b50168029d81e58e800b690877ef0b30580d107659250da1d1"
 dependencies = [
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-program",
  "spl-program-error-derive",
@@ -3178,7 +3095,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd99ff1e9ed2ab86e3fd582850d47a739fec1be9f4661cba1782d3a0f26805f3"
 dependencies = [
  "bytemuck",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-account-info",
  "solana-decode-error",
@@ -3201,7 +3118,7 @@ checksum = "ed320a6c934128d4f7e54fe00e16b8aeaecf215799d060ae14f93378da6dc834"
 dependencies = [
  "arrayref",
  "bytemuck",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "num_enum",
  "solana-program",
@@ -3216,7 +3133,7 @@ checksum = "5b27f7405010ef816587c944536b0eafbcc35206ab6ba0f2ca79f1d28e488f4f"
 dependencies = [
  "arrayref",
  "bytemuck",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "num_enum",
  "solana-program",
@@ -3280,7 +3197,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d595667ed72dbfed8c251708f406d7c2814a3fa6879893b323d56a10bedfc799"
 dependencies = [
  "bytemuck",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-decode-error",
  "solana-instruction",
@@ -3299,7 +3216,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfb9c89dbc877abd735f05547dcf9e6e12c00c11d6d74d8817506cab4c99fdbb"
 dependencies = [
  "borsh 1.5.5",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-borsh",
  "solana-decode-error",
@@ -3337,7 +3254,7 @@ checksum = "4aa7503d52107c33c88e845e1351565050362c2314036ddf19a36cd25137c043"
 dependencies = [
  "arrayref",
  "bytemuck",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-account-info",
  "solana-cpi",
@@ -3374,7 +3291,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba70ef09b13af616a4c987797870122863cba03acc4284f226a4473b043923f9"
 dependencies = [
  "bytemuck",
- "num-derive 0.4.2",
+ "num-derive",
  "num-traits",
  "solana-account-info",
  "solana-decode-error",
@@ -3871,14 +3788,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
 dependencies = [
  "tap",
-]
-
-[[package]]
-name = "zap-sdk"
-version = "0.1.0"
-source = "git+https://github.com/MeteoraAg/zap-program?rev=064c58b317b9a85f212c0de72caea286fc72fdb4#064c58b317b9a85f212c0de72caea286fc72fdb4"
-dependencies = [
- "solana-pubkey",
 ]
 
 [[package]]

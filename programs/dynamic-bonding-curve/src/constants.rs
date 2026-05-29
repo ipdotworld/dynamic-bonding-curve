@@ -135,26 +135,11 @@ pub mod fee {
 }
 
 pub mod seeds {
-    pub const CONFIG_PREFIX: &[u8] = b"config";
-    pub const CUSTOMIZABLE_POOL_PREFIX: &[u8] = b"cpool";
     pub const POOL_PREFIX: &[u8] = b"pool";
     pub const TOKEN_VAULT_PREFIX: &[u8] = b"token_vault";
     pub const POOL_AUTHORITY_PREFIX: &[u8] = b"pool_authority";
-    pub const POSITION_PREFIX: &[u8] = b"position";
-    pub const POSITION_NFT_ACCOUNT_PREFIX: &[u8] = b"position_nft_account";
-    pub const TOKEN_BADGE_PREFIX: &[u8] = b"token_badge";
-    pub const REWARD_VAULT_PREFIX: &[u8] = b"reward_vault";
-    pub const CLAIM_FEE_OPERATOR_PREFIX: &[u8] = b"cf_operator";
-    pub const METEORA_METADATA_PREFIX: &[u8] = b"meteora";
-    pub const DAMM_V2_METADATA_PREFIX: &[u8] = b"damm_v2";
     pub const PARTNER_METADATA_PREFIX: &[u8] = b"partner_metadata";
     pub const VIRTUAL_POOL_METADATA_PREFIX: &[u8] = b"virtual_pool_metadata";
     pub const BASE_LOCKER_PREFIX: &[u8] = b"base_locker";
     pub const OPERATOR_PREFIX: &[u8] = b"operator";
 }
-
-// Upper bound on OperatorPermission bit slots. Slots 0/2/3 are live roles;
-// slots 1 and 4 are reserved discriminant gaps (REQ-D-004). Operator creation
-// no longer uses this bound directly — `validate_single_role_permission` enforces
-// exactly one *valid* role (see state/operator.rs).
-pub const MAX_OPERATION: u8 = 5;

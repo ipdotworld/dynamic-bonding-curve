@@ -2,14 +2,13 @@ use std::u128;
 
 use anchor_lang::{prelude::*, solana_program::clock::SECONDS_PER_DAY};
 use anchor_spl::token_interface::Mint;
-use damm_v2::constants::MAX_BASIS_POINT;
 use locker::types::CreateVestingEscrowParameters;
 use static_assertions::const_assert_eq;
 
 use crate::{
     activation_handler::ActivationType,
     constants::{
-        fee::{MAX_POOL_CREATION_FEE, MIN_POOL_CREATION_FEE, PROTOCOL_LIQUIDITY_MIGRATION_FEE_BPS},
+        fee::{MAX_POOL_CREATION_FEE, MIN_POOL_CREATION_FEE},
         MAX_CURVE_POINT, MAX_LOCK_DURATION_IN_SECONDS, MAX_MIGRATED_POOL_FEE_BPS,
         MAX_MIGRATION_FEE_PERCENTAGE, MAX_SQRT_PRICE, MIN_LOCKED_LIQUIDITY_BPS,
         MIN_MIGRATED_POOL_FEE_BPS, MIN_SQRT_PRICE, TOKEN_VESTING_NUMBER_OF_PERIODS,
@@ -20,9 +19,7 @@ use crate::{
         validate_vesting_parameters, BaseFeeMode as DammV2BaseFeeMode, DammV2DynamicFee,
         DammV2PodAlignedFeeMarketCapScheduler,
     },
-    migration_handler::{
-        get_migration_handler, CompoundingLiquidity, MigratedCollectFeeMode, MigrationHandler,
-    },
+    migration_handler::{get_migration_handler, MigratedCollectFeeMode},
     params::{
         fee_parameters::{to_numerator, PoolFeeParameters},
         liquidity_distribution::{
@@ -73,12 +70,13 @@ pub struct ConfigParameters {
     pub padding: [u8; 2],
     pub curve: Vec<LiquidityDistributionParameters>,
     /// IPWorld fee shares (in FEE_SHARE_PRECISION = 1_000_000 units)
-    /// ip_owner_share + airdrop_share + referral_share must be < 1_000_000
+    /// ip_owner_share + airdrop_share must be < 1_000_000
     /// (SPEC-DBC-004 Phase 3 — REQ-I-001: `creator_share` removed from the
-    /// IPWorld 4-way SELL fee model)
+    /// IPWorld SELL fee model; SPEC-DBC-AUDIT-001 Phase 8 — REQ-A-005:
+    /// `referral_share` removed — referral is handled externally via the
+    /// `pool_fees` referral_fee, not a config share)
     pub ip_owner_share: u32,
     pub airdrop_share: u32,
-    pub referral_share: u32,
     /// token_airdrop_share must be < 1_000_000 (independent of quote fee shares)
     pub token_airdrop_share: u32,
 }
@@ -179,24 +177,12 @@ impl MigratedPoolFeeValidator {
             PoolError::InvalidMigratedFeeConfig
         );
 
-        // validate collect fee mode
-        let migrated_collect_fee_mode = MigratedCollectFeeMode::try_from(self.collect_fee_mode)
+        // validate collect fee mode is a known enum value (rejects garbage u8).
+        // The Compounding-specific compounding_fee_bps validation is unreachable:
+        // the REQ-I-002 firewall above already pins collect_fee_mode == QuoteToken
+        // and compounding_fee_bps == 0, so only the QuoteToken case can be reached.
+        MigratedCollectFeeMode::try_from(self.collect_fee_mode)
             .map_err(|_| PoolError::InvalidCollectFeeMode)?;
-
-        match migrated_collect_fee_mode {
-            MigratedCollectFeeMode::Compounding => {
-                require!(
-                    self.compounding_fee_bps > 0 && self.compounding_fee_bps <= MAX_BASIS_POINT,
-                    PoolError::InvalidMigratedPoolFee
-                );
-            }
-            _ => {
-                require!(
-                    self.compounding_fee_bps == 0,
-                    PoolError::InvalidMigratedPoolFee
-                );
-            }
-        }
         // validate migrated dynamic fee option
         require!(
             DammV2DynamicFee::try_from(self.dynamic_fee).is_ok(),
@@ -588,11 +574,11 @@ impl ConfigParameters {
         // Validate IPWorld fee shares
         // Quote fee shares (SELL side): sum must be strictly less than FEE_SHARE_PRECISION (remainder goes to protocol treasury)
         // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed from the sum.
+        // SPEC-DBC-AUDIT-001 Phase 8 (REQ-A-005): `referral_share` removed from the sum
+        // (referral is a separate `pool_fees` referral_fee, not a config share).
         let total_quote_share = self
             .ip_owner_share
             .checked_add(self.airdrop_share)
-            .ok_or(PoolError::MathOverflow)?
-            .checked_add(self.referral_share)
             .ok_or(PoolError::MathOverflow)?;
         require!(
             total_quote_share < FEE_SHARE_PRECISION,
@@ -669,7 +655,6 @@ pub fn handle_create_config(
         compounding_fee_bps,
         ip_owner_share,
         airdrop_share,
-        referral_share,
         token_airdrop_share,
         ..
     } = config_parameters.clone();
@@ -696,7 +681,7 @@ pub fn handle_create_config(
         migrated_collect_fee_mode,
         migration_sqrt_price,
     );
-    let (included_protocol_fee_migration_base_amount, included_protocol_fee_migration_quote_amount) =
+    let (included_protocol_fee_migration_base_amount, _included_protocol_fee_migration_quote_amount) =
         liquidity_handler.get_included_protocol_fee_migration_amounts_1(
             migration_quote_threshold,
             migration_fee.fee_percentage,
@@ -708,30 +693,9 @@ pub fn handle_create_config(
         PoolError::InvalidCurve
     );
 
-    if migration_option_enum == MigrationOption::DammV2
-        && migrated_collect_fee_mode == MigratedCollectFeeMode::Compounding
-    {
-        let compounding_liquidity = CompoundingLiquidity {
-            migration_sqrt_price,
-        };
-        let (protocol_migration_base_fee, protocol_migration_quote_fee) = compounding_liquidity
-            .get_migration_protocol_fees(
-                included_protocol_fee_migration_base_amount,
-                included_protocol_fee_migration_quote_amount,
-                PROTOCOL_LIQUIDITY_MIGRATION_FEE_BPS.into(),
-            )?;
-
-        let excluded_protocol_fee_migration_base_amount =
-            included_protocol_fee_migration_base_amount.safe_sub(protocol_migration_base_fee)?;
-        let excluded_protocol_fee_migration_quote_amount =
-            included_protocol_fee_migration_quote_amount.safe_sub(protocol_migration_quote_fee)?;
-
-        CompoundingLiquidity::validate_initial_pool_information(
-            excluded_protocol_fee_migration_base_amount,
-            excluded_protocol_fee_migration_quote_amount,
-            migration_sqrt_price,
-        )?;
-    }
+    // The Compounding-mode migration pre-validation was removed: Compounding is
+    // rejected by the REQ-I-002 firewall in `validate_config_parameters`, so this
+    // branch was unreachable dead code (it only computed and discarded fee amounts).
 
     let (fixed_token_supply_flag, pre_migration_token_supply, post_migration_token_supply) =
         if let Some(TokenSupplyParams {
@@ -815,7 +779,6 @@ pub fn handle_create_config(
         enable_first_swap_with_min_fee.into(),
         ip_owner_share,
         airdrop_share,
-        referral_share,
         token_airdrop_share,
     )?;
 

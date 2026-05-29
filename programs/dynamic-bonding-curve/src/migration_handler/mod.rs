@@ -1,6 +1,3 @@
-pub mod compounding_liquidity;
-pub use compounding_liquidity::*;
-
 pub mod concentrated_liquidity;
 pub use concentrated_liquidity::*;
 
@@ -88,25 +85,17 @@ pub trait MigrationHandler {
 }
 
 pub fn get_migration_handler(
-    migration_option: MigrationOption,
-    migrated_collect_fee_mode: MigratedCollectFeeMode,
+    _migration_option: MigrationOption,
+    _migrated_collect_fee_mode: MigratedCollectFeeMode,
     migration_sqrt_price: u128,
 ) -> Box<dyn MigrationHandler> {
-    // DAMM v1 migration disabled — MeteoraDammDisabled variant should never reach here
-    // (rejected at config creation time). Treat as compounding for safety.
-    if migration_option == MigrationOption::MeteoraDammDisabled {
-        return Box::new(CompoundingLiquidity {
-            migration_sqrt_price,
-        });
-    }
-    // else damm v2
-    if migrated_collect_fee_mode == MigratedCollectFeeMode::Compounding {
-        Box::new(CompoundingLiquidity {
-            migration_sqrt_price,
-        })
-    } else {
-        Box::new(ConcentratedLiquidity {
-            migration_sqrt_price,
-        })
-    }
+    // IPWorld only ever reaches migration with `migration_option == DammV2` and
+    // `migrated_collect_fee_mode == QuoteToken`: DAMM v1 (MeteoraDammDisabled) is
+    // rejected at config creation (ix_create_config), and the REQ-I-002 firewall
+    // hard-rejects any collect_fee_mode other than QuoteToken. The Compounding
+    // handler is therefore never constructed; ConcentratedLiquidity is the sole
+    // migration handler.
+    Box::new(ConcentratedLiquidity {
+        migration_sqrt_price,
+    })
 }

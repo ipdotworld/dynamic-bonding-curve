@@ -70,13 +70,6 @@ pub mod dynamic_bonding_curve {
         Ok(())
     }
 
-    #[access_control(is_admin(ctx.accounts.signer.key))]
-    pub fn close_claim_protocol_fee_operator(
-        ctx: Context<CloseClaimProtocolFeeOperatorCtx>,
-    ) -> Result<()> {
-        instructions::handle_close_claim_protocol_fee_operator(ctx)
-    }
-
     #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::ClaimProtocolFee))]
     pub fn claim_protocol_fee<'c: 'info, 'info>(
         ctx: Context<'_, '_, 'c, 'info, ClaimProtocolFeesCtx<'info>>,
@@ -276,28 +269,15 @@ pub mod dynamic_bonding_curve {
         instructions::handle_transfer_pool_creator(ctx)
     }
 
-    /// BOTH partner and creator FUNCTIONS ///
-    pub fn withdraw_migration_fee<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, WithdrawMigrationFeeCtx<'info>>, flag: u8) -> Result<()> {
-        instructions::handle_withdraw_migration_fee(ctx, flag)
+    /// Operator/treasury withdraws the migrated pool's accumulated migration fee.
+    pub fn withdraw_migration_fee<'c: 'info, 'info>(ctx: Context<'_, '_, 'c, 'info, WithdrawMigrationFeeCtx<'info>>) -> Result<()> {
+        instructions::handle_withdraw_migration_fee(ctx)
     }
 
     /// TRADING BOTS FUNCTIONS ////
+    /// Canonical swap entrypoint (formerly `swap2`; the legacy `swap` wrapper that
+    /// adapted `SwapParameters` was removed in SPEC-DBC-AUDIT-001 Phase 8 — REQ-F-003).
     pub fn swap<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, SwapCtx<'info>>,
-        params: SwapParameters,
-    ) -> Result<()> {
-        instructions::handle_swap_wrapper(
-            ctx,
-            SwapParameters2 {
-                amount_0: params.amount_in,
-                amount_1: params.minimum_amount_out,
-                swap_mode: SwapMode::ExactIn.into(),
-                ..Default::default()
-            },
-        )
-    }
-
-    pub fn swap2<'c: 'info, 'info>(
         ctx: Context<'_, '_, 'c, 'info, SwapCtx<'info>>,
         params: SwapParameters2,
     ) -> Result<()> {
@@ -316,16 +296,6 @@ pub mod dynamic_bonding_curve {
     }
 
     // migrate damm v2
-    #[deprecated(
-        since = "0.1.7",
-        note = "It's unneeded. Will be removed in next release version"
-    )]
-    pub fn migration_damm_v2_create_metadata<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, MigrationDammV2CreateMetadataCtx<'info>>,
-    ) -> Result<()> {
-        instructions::handle_migration_damm_v2_create_metadata(ctx)
-    }
-
     pub fn migration_damm_v2<'c: 'info, 'info>(
         ctx: Context<'_, '_, 'c, 'info, MigrateDammV2Ctx<'info>>,
     ) -> Result<()> {
