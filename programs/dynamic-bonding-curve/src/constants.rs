@@ -63,6 +63,35 @@ pub const MAX_LOCK_DURATION_IN_SECONDS: u64 = 3600 * 24 * 365 * 2; // 2 years
 
 static_assertions::const_assert!(MAX_LOCK_DURATION_IN_SECONDS <= u32::MAX as u64);
 
+/// SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001): fixed token-allocation vesting duration
+/// applied to the migration locker (`create_locker`).
+///
+/// The IP owner's TOKEN allocation vests **linearly over 180 days, with no cliff, no
+/// clawback, anchored to the migration (finish-curve) timestamp** — matching the EVM
+/// `IPOwnerVault.sol` 3-month token vesting (the ETH/quote share is paid immediately;
+/// only the token allocation vests). The duration is fixed here as a program constant
+/// (consistent with REQ-A-006's fixed-share approach) rather than read from the mutable
+/// per-pool `LockedVestingConfig`, so the EFFECTIVE token-vesting duration cannot be
+/// misconfigured. See `LockedVestingParams::to_create_vesting_escrow_params`.
+///
+/// 180 days × 86400 seconds = 15_552_000 seconds.
+pub const TOKEN_VESTING_DURATION_SECONDS: u64 = 180 * 86_400;
+
+/// Number of linear vesting periods used to span [`TOKEN_VESTING_DURATION_SECONDS`].
+/// 180 daily periods (one per day) realise the 180-day linear schedule exactly:
+/// `TOKEN_VESTING_PERIOD_FREQUENCY * TOKEN_VESTING_NUMBER_OF_PERIODS == 180 days`.
+pub const TOKEN_VESTING_NUMBER_OF_PERIODS: u64 = 180;
+
+/// Seconds per vesting period (1 day). The Meteora locker releases
+/// `amount_per_period` every `frequency` seconds; daily granularity keeps the
+/// schedule clean while integer-dividing the duration exactly.
+pub const TOKEN_VESTING_PERIOD_FREQUENCY: u64 = 86_400;
+
+static_assertions::const_assert_eq!(
+    TOKEN_VESTING_PERIOD_FREQUENCY * TOKEN_VESTING_NUMBER_OF_PERIODS,
+    TOKEN_VESTING_DURATION_SECONDS
+);
+
 /// Store constants related to fees
 pub mod fee {
 

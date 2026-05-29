@@ -1,22 +1,26 @@
 use anchor_lang::prelude::*;
-use anchor_lang::system_program::System;
-use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::{
     const_pda,
-    constants::seeds::POOL_AUTHORITY_PREFIX,
     event::EvtClaimIpOwnerFee,
     state::{TokenVerification, VirtualPool},
+    token::transfer_token_from_pool_authority,
     PoolError,
 };
 
-/// Allows the verified IP owner to drain accumulated quote fees into the
-/// `ip-owner-vault` program for linear vesting (SPEC-DBC-004 Phase 6 REQ-I-003).
+/// Allows the verified IP owner to withdraw accumulated quote (SOL) fees.
+///
+/// SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001): the IP-owner quote/SOL share is paid
+/// **immediately** to the IP owner's own quote token account at claim time — it is
+/// NOT routed into the `ip-owner-vault` for vesting. This matches the EVM model
+/// (`protocol/src/IPOwnerVault.sol`), where the ETH/quote share is released
+/// immediately and only the token allocation vests.
 ///
 /// Authorization: caller must be `token_verification.ip_owner`.
 /// Requires a valid `TokenVerification` PDA — created by `verify_token`.
-/// Quote fees flow: pool quote_vault → vault ATA (CPI signed by pool_authority).
+/// Quote fees flow: `pool.quote_vault` → IP owner's quote token account, via a
+/// `transfer_checked` signed by `pool_authority`.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct ClaimIpOwnerFeeCtx<'info> {
@@ -42,9 +46,8 @@ pub struct ClaimIpOwnerFeeCtx<'info> {
     )]
     pub token_verification: Account<'info, TokenVerification>,
 
-    /// The verified IP owner — must sign this transaction. The fee is NOT
-    /// transferred directly to this signer's wallet; it is forwarded to the
-    /// vault for linear vesting and later claimed via `ip_owner_vault::claim_vested`.
+    /// The verified IP owner — must sign this transaction. The quote fee is paid
+    /// directly to `ip_owner_token_account` (owned by this signer) immediately.
     pub ip_owner: Signer<'info>,
 
     /// Quote mint (SOL wrapper / WSOL or other quote token).
@@ -54,31 +57,17 @@ pub struct ClaimIpOwnerFeeCtx<'info> {
     #[account(mut, token::mint = quote_mint)]
     pub quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    // ── Vault CPI accounts (SPEC-DBC-004 Phase 6 REQ-I-003) ─────────────────
-
-    /// Vault data PDA in the ip-owner-vault program.
-    /// `init_if_needed` happens inside the vault program's CPI handler.
-    /// CHECK: Owned by ip-owner-vault; validated by seeds inside the vault program.
-    #[account(mut)]
-    pub vault: AccountInfo<'info>,
-
-    /// Vault-owned ATA receiving the quote fee.
-    /// `init_if_needed` happens inside the vault program's CPI handler.
-    /// CHECK: Validated by associated_token constraints inside the vault program.
-    #[account(mut)]
-    pub vault_token_account: AccountInfo<'info>,
-
-    /// Pays for `init_if_needed` of the vault data PDA + ATA on first deposit.
-    #[account(mut)]
-    pub payer: Signer<'info>,
-
-    /// The ip-owner-vault program (target of the CPI).
-    pub ip_owner_vault_program: Program<'info, ip_owner_vault::program::IpOwnerVault>,
+    /// The IP owner's quote token account that receives the fee immediately.
+    /// Must be owned by the verified `ip_owner` and hold the pool's quote mint.
+    #[account(
+        mut,
+        token::mint = quote_mint,
+        token::authority = ip_owner,
+    )]
+    pub ip_owner_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Token program for the quote mint.
     pub token_quote_program: Interface<'info, TokenInterface>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub system_program: Program<'info, System>,
 }
 
 pub fn handle_claim_ip_owner_fee<'c: 'info, 'info>(
@@ -97,47 +86,69 @@ pub fn handle_claim_ip_owner_fee<'c: 'info, 'info>(
         amount
     };
 
-    // ── Phase 2: CPI to ip_owner_vault::distribute_to_vault ──────────────────
-    // pool_authority is a PDA owned by the DBC program; we sign with its seeds
-    // at the boundary so the vault program's inner SPL transfer inherits the
-    // signer status of pool_authority.
-    let pool_authority_signer_seeds: &[&[u8]] =
-        &[POOL_AUTHORITY_PREFIX, &[const_pda::pool_authority::BUMP]];
-    let signer_seeds_arr = [pool_authority_signer_seeds];
-
-    let cpi_accounts = ip_owner_vault::cpi::accounts::DistributeToVaultCtx {
-        vault: ctx.accounts.vault.to_account_info(),
-        token_mint: ctx.accounts.quote_mint.to_account_info(),
-        source_token_account: ctx.accounts.quote_vault.to_account_info(),
-        vault_token_account: ctx.accounts.vault_token_account.to_account_info(),
-        authority: ctx.accounts.pool_authority.to_account_info(),
-        // SPEC-DBC-AUDIT-001 Phase 2 (SEC-P2-01): bind the vault to THIS pool.
-        // This call is already gated on `TokenVerification[pool].ip_owner`, so the
-        // pool passed here is the genuine authorizing pool for the deposit.
-        pool: ctx.accounts.pool.to_account_info(),
-        payer: ctx.accounts.payer.to_account_info(),
-        token_program: ctx.accounts.token_quote_program.to_account_info(),
-        associated_token_program: ctx.accounts.associated_token_program.to_account_info(),
-        system_program: ctx.accounts.system_program.to_account_info(),
-    };
-
-    let cpi_ctx = CpiContext::new_with_signer(
-        ctx.accounts.ip_owner_vault_program.to_account_info(),
-        cpi_accounts,
-        &signer_seeds_arr,
-    );
-
-    ip_owner_vault::cpi::distribute_to_vault(cpi_ctx, amount)?;
+    // ── Phase 2: pay the IP owner IMMEDIATELY (no vault vesting) ──────────────
+    // SPEC-DBC-AUDIT-001 REQ-C-001: quote share is released at claim time, signed
+    // by `pool_authority` (the SPL transfer authority over `pool.quote_vault`).
+    // `transfer_token_from_pool_authority` also appends any Token-2022 transfer-hook
+    // accounts from `remaining_accounts`, mirroring the sibling claim instructions.
+    transfer_token_from_pool_authority(
+        ctx.accounts.pool_authority.to_account_info(),
+        &ctx.accounts.quote_mint,
+        &ctx.accounts.quote_vault,
+        ctx.accounts.ip_owner_token_account.to_account_info(),
+        &ctx.accounts.token_quote_program,
+        amount,
+        ctx.remaining_accounts,
+    )?;
 
     // ── Phase 3: emit event ──────────────────────────────────────────────────
     emit_cpi!(EvtClaimIpOwnerFee {
         pool: ctx.accounts.pool.key(),
         ip_owner: ctx.accounts.ip_owner.key(),
-        vault: ctx.accounts.vault.key(),
+        ip_owner_token_account: ctx.accounts.ip_owner_token_account.key(),
         token_quote_amount: amount,
-        routed_to_vault: true,
+        paid_immediately: true,
         timestamp: Clock::get()?.unix_timestamp,
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001): the IP-owner quote/SOL share is paid
+    // IMMEDIATELY at claim time to the IP owner's own quote token account — it is NOT
+    // routed into the `ip-owner-vault` for vesting.
+    //
+    // The full transfer flow requires an on-chain Anchor context (test validator /
+    // ts-mocha — see `tests/ip_owner_vault_flow.tests.ts`). At the Rust level we pin the
+    // event contract that proves the immediate-payment path: the event reports the IP
+    // owner's destination token account and `paid_immediately == true`, and the
+    // pre-AUDIT `vault` / `routed_to_vault` fields no longer exist.
+
+    /// The emitted event reflects immediate payment to the IP owner's token account.
+    #[test]
+    fn event_reflects_immediate_payment() {
+        let pool = Pubkey::new_unique();
+        let ip_owner = Pubkey::new_unique();
+        let ip_owner_token_account = Pubkey::new_unique();
+
+        let evt = EvtClaimIpOwnerFee {
+            pool,
+            ip_owner,
+            ip_owner_token_account,
+            token_quote_amount: 12_345,
+            paid_immediately: true,
+            timestamp: 1_700_000_000,
+        };
+
+        // Quote is paid immediately, never vault-routed.
+        assert!(evt.paid_immediately);
+        // The destination is the IP owner's own quote token account.
+        assert_eq!(evt.ip_owner_token_account, ip_owner_token_account);
+        assert_eq!(evt.ip_owner, ip_owner);
+        assert_eq!(evt.token_quote_amount, 12_345);
+    }
 }

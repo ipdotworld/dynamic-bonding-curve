@@ -182,18 +182,22 @@ pub struct EvtClaimTradingFee {
 // SPEC-DBC-004 Phase 3 (REQ-I-001): `EvtClaimCreatorTradingFee` removed
 // alongside the `claim_creator_trading_fee` instruction.
 
-/// Emitted by `claim_ip_owner_fee` (SPEC-DBC-004 Phase 6 REQ-I-003).
+/// Emitted by `claim_ip_owner_fee`.
 ///
-/// `routed_to_vault: true` indicates the quote fee was forwarded to the
-/// `ip-owner-vault` program via CPI for linear vesting; `false` would indicate
-/// a legacy direct transfer (not currently used post-Phase 6).
+/// SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001): the IP-owner quote/SOL share is paid
+/// IMMEDIATELY to the IP owner's own quote token account (`ip_owner_token_account`),
+/// not routed into the `ip-owner-vault` for vesting. `paid_immediately` is always
+/// `true` on this path and is retained for downstream/event-history clarity vs. the
+/// pre-AUDIT vault-routing behavior (`routed_to_vault`).
 #[event]
 pub struct EvtClaimIpOwnerFee {
     pub pool: Pubkey,
     pub ip_owner: Pubkey,
-    pub vault: Pubkey,
+    /// The IP owner's quote token account that received the fee directly.
+    pub ip_owner_token_account: Pubkey,
     pub token_quote_amount: u64,
-    pub routed_to_vault: bool,
+    /// Always `true`: the quote share is paid immediately (no vault vesting).
+    pub paid_immediately: bool,
     pub timestamp: i64,
 }
 

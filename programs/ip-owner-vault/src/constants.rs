@@ -30,15 +30,19 @@ pub fn derive_pool_authority() -> Pubkey {
     Pubkey::find_program_address(&[POOL_AUTHORITY_PREFIX], &DBC_PROGRAM_ID).0
 }
 
-/// Linear vesting duration applied to IP owner fee deposits.
+/// Linear vesting duration applied to token-allocation deposits.
 ///
 /// Formula: `released = total_deposited * min(now - vesting_start, DURATION) / DURATION`.
 /// No cliff. Stamp set on first deposit; subsequent deposits do not reset the clock.
 ///
-/// Default: one calendar year (365 days × 86400 seconds = 31_536_000 seconds).
-/// This balances UX (predictable annualised release schedule) with anti-rug guarantees
-/// (an instant claim of the IP owner side is impossible — the vault must accrue time).
-pub const VESTING_DURATION_SECONDS: i64 = 365 * 86_400;
+/// SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001): 180 days (180 × 86400 = 15_552_000 seconds).
+/// This matches the EVM `IPOwnerVault.sol` "3-month" token-allocation vesting (linear,
+/// no cliff, no clawback, anchored to first deposit — see `protocol/src/IPOwnerVault.sol`).
+/// Note: as of REQ-C-001 the IP-owner QUOTE/SOL fee is paid immediately at
+/// `claim_ip_owner_fee` and is no longer routed here, so this vault currently has no
+/// deposit source (dormant). The constant is kept correct so the vault vests over 180
+/// days (not 365) should it ever be reactivated for a token-allocation deposit path.
+pub const VESTING_DURATION_SECONDS: i64 = 180 * 86_400;
 
 /// PDA seed prefix for the per-mint Vault account.
 ///
@@ -66,5 +70,14 @@ mod tests {
             DBC_PROGRAM_ID,
             Pubkey::from_str_const("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN")
         );
+    }
+
+    /// SPEC-DBC-AUDIT-001 REQ-C-001 / AC-C-001: the token-allocation vesting duration
+    /// is exactly 180 days (matching the EVM `IPOwnerVault.sol` 3-month vesting), not
+    /// the previous 365 days. Pins the constant against accidental reversion.
+    #[test]
+    fn vesting_duration_is_180_days() {
+        assert_eq!(VESTING_DURATION_SECONDS, 180 * 86_400);
+        assert_eq!(VESTING_DURATION_SECONDS, 15_552_000);
     }
 }
