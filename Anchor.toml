@@ -5,7 +5,6 @@ skip-lint = false
 [programs.localnet]
 dynamic_bonding_curve = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
 ipworld_hook = "7WDGrFPSEQjh42aLrzDkqWu6RTCeDYJeTRErKDQDLiC1"
-ipworld_splitter = "3DuLUcRJpiSubGnDtE7LLaJVdKxUSoUqKFHHmT6KBSqC"
 ip_owner_vault = "HnLA2rxN4uJM1yaRaKZ3kmV9Dqjz7JoQYpk2haVE4gUf"
 
 [registry]
