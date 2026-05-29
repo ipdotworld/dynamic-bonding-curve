@@ -247,6 +247,15 @@ pub enum PoolError {
 
     #[msg("Operator permission slot is reserved or no longer supported — see SPEC-DBC-004 REQ-I-004")]
     UnsupportedOperatorPermission,
+
+    #[msg("Referral payout requested but TokenVerification account was not provided")]
+    MissingTokenVerification,
+
+    #[msg("TokenVerification account is not the canonical PDA / not owned by this program")]
+    InvalidTokenVerification,
+
+    #[msg("Referral token account is not owned by the registered referral wallet")]
+    InvalidReferralAccount,
 }
 
 impl From<ProtozolZapError> for PoolError {

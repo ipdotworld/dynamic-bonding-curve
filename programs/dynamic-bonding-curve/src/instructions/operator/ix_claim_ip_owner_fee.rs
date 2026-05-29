@@ -111,6 +111,10 @@ pub fn handle_claim_ip_owner_fee<'c: 'info, 'info>(
         source_token_account: ctx.accounts.quote_vault.to_account_info(),
         vault_token_account: ctx.accounts.vault_token_account.to_account_info(),
         authority: ctx.accounts.pool_authority.to_account_info(),
+        // SPEC-DBC-AUDIT-001 Phase 2 (SEC-P2-01): bind the vault to THIS pool.
+        // This call is already gated on `TokenVerification[pool].ip_owner`, so the
+        // pool passed here is the genuine authorizing pool for the deposit.
+        pool: ctx.accounts.pool.to_account_info(),
         payer: ctx.accounts.payer.to_account_info(),
         token_program: ctx.accounts.token_quote_program.to_account_info(),
         associated_token_program: ctx.accounts.associated_token_program.to_account_info(),

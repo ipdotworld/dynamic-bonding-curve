@@ -21,6 +21,18 @@ pub enum VaultError {
     #[msg("TokenVerification account discriminator does not match.")]
     InvalidTokenVerification,
 
+    #[msg("TokenVerification account is not owned by the DBC program.")]
+    TokenVerificationWrongOwner,
+
+    #[msg("TokenVerification account is not the canonical PDA for the supplied pool.")]
+    TokenVerificationWrongPda,
+
     #[msg("Distribution amount is zero — refusing to record empty deposit.")]
     AmountIsZero,
+
+    #[msg("Distribution authority is not the DBC pool_authority PDA.")]
+    InvalidDistributeAuthority,
+
+    #[msg("Supplied pool does not match the pool bound to this vault.")]
+    PoolMismatch,
 }

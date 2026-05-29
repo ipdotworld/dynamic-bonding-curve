@@ -14,6 +14,45 @@ use errors::HookError;
 
 declare_id!("HooK1111111111111111111111111111111111111111");
 
+/// On-chain program id of the dynamic-bonding-curve (DBC) program.
+///
+/// SPEC-DBC-AUDIT-001 Phase 2 (REQ-E-003): `initialize_hook_config` must only be
+/// callable by DBC's `pool_authority` PDA (the legitimate CPI caller during pool
+/// init). We derive that PDA against this program id and require the signer match.
+pub const DBC_PROGRAM_ID: Pubkey = pubkey!("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
+
+/// PDA seed prefix for DBC's `pool_authority` (single static seed, no per-mint
+/// component): `pool_authority = find_program_address([b"pool_authority"], DBC)`.
+/// Confirmed from DBC `constants::seeds::POOL_AUTHORITY_PREFIX` + `const_pda`.
+pub const POOL_AUTHORITY_PREFIX: &[u8] = b"pool_authority";
+
+/// PDA seed prefix for DBC's per-pool token vaults.
+///
+/// SPEC-DBC-AUDIT-001 Phase 2 (SEC-P2-02): DBC creates the base vault at
+/// `[TOKEN_VAULT_PREFIX, base_mint, pool]` (see
+/// `ix_initialize_virtual_pool_with_token2022` / `_with_spl_token`). We replicate
+/// the seeds (dependency-free) to bind the hook's stored `pool_vault` to the
+/// canonical PER-POOL base vault, not merely to the global `pool_authority`.
+pub const TOKEN_VAULT_PREFIX: &[u8] = b"token_vault";
+
+/// Derive DBC's `pool_authority` PDA. Pure helper so the derivation is unit-testable.
+pub fn derive_pool_authority() -> Pubkey {
+    Pubkey::find_program_address(&[POOL_AUTHORITY_PREFIX], &DBC_PROGRAM_ID).0
+}
+
+/// Derive DBC's canonical base-vault PDA for `(mint, pool)`.
+///
+/// SEC-P2-02: the hook's `pool_vault` MUST equal this PDA, proving it is the
+/// specific pool's base vault rather than any token account controlled by the
+/// global `pool_authority`. Pure helper → unit-testable.
+pub fn derive_base_vault(mint: &Pubkey, pool: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[TOKEN_VAULT_PREFIX, mint.as_ref(), pool.as_ref()],
+        &DBC_PROGRAM_ID,
+    )
+    .0
+}
+
 
 #[program]
 pub mod ipworld_hook {
@@ -68,9 +107,39 @@ pub mod ipworld_hook {
 
     /// Called once per mint (CPI from DBC, Step 3).
     /// Stores pool_vault so Execute knows the curve address.
+    ///
+    /// SPEC-DBC-AUDIT-001 Phase 2: a front-runner must not be able to initialize
+    /// this config (which would brick the token / neuter the transfer cap) nor
+    /// seed an unverified `pool_vault`. Three guards close the gap:
+    ///   1. (REQ-E-003) `authority` MUST equal DBC's `pool_authority` PDA — only
+    ///      the legitimate pool-init CPI signs as that PDA;
+    ///   2. (REQ-E-003) `pool_vault` is constrained (accounts struct) to be a real
+    ///      token account for `mint` whose authority is that `pool_authority`; and
+    ///   3. (SEC-P2-02) `pool_vault` MUST be the canonical PER-POOL base vault
+    ///      `[TOKEN_VAULT_PREFIX, mint, pool]` under DBC — so the stored vault is
+    ///      bound to THIS pool, not to any token account the global pool_authority
+    ///      controls. Guard 1 alone only proves "some DBC pool-init is signing".
+    ///
+    /// CPI guarantee: the sole caller, DBC `ix_initialize_virtual_pool_with_token2022`,
+    /// already passes the freshly-created canonical base vault and `base_mint`/`pool`.
+    /// Guard 3 makes the hook self-validating regardless, as defense-in-depth.
     pub fn initialize_hook_config(
         ctx: Context<InitializeHookConfig>,
     ) -> Result<()> {
+        // Guard 1: signer must be the canonical DBC pool_authority PDA.
+        require_keys_eq!(
+            ctx.accounts.authority.key(),
+            derive_pool_authority(),
+            HookError::InvalidAuthority
+        );
+
+        // Guard 3: pool_vault must be THIS pool's canonical base vault under DBC.
+        require_keys_eq!(
+            ctx.accounts.pool_vault.key(),
+            derive_base_vault(&ctx.accounts.mint.key(), &ctx.accounts.pool.key()),
+            HookError::InvalidPoolVault
+        );
+
         let cfg = &mut ctx.accounts.hook_config;
         cfg.pool_vault = ctx.accounts.pool_vault.key();
         cfg.bump = ctx.bumps.hook_config;
@@ -141,14 +210,28 @@ pub struct InitializeHookConfig<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    /// DBC pool_authority PDA must sign this CPI.
+    /// DBC pool_authority PDA must sign this CPI. Equality against the canonical
+    /// `pool_authority` PDA is enforced in the handler (REQ-E-003 Guard 1).
     pub authority: Signer<'info>,
 
-    /// CHECK: The base token mint.
-    pub mint: UncheckedAccount<'info>,
+    /// The base token mint.
+    pub mint: InterfaceAccount<'info, Mint>,
 
-    /// CHECK: DBC's base token vault.
-    pub pool_vault: UncheckedAccount<'info>,
+    /// The DBC `VirtualPool` this hook config belongs to. Used to bind `pool_vault`
+    /// to the canonical per-pool base vault (SEC-P2-02 Guard 3, enforced in handler).
+    /// CHECK: only its key participates in the base-vault PDA derivation.
+    pub pool: UncheckedAccount<'info>,
+
+    /// DBC's base token vault.
+    /// REQ-E-003 Guard 2: a genuine token account for `mint` whose authority is the
+    /// `pool_authority` signer. SEC-P2-02 Guard 3 (handler) additionally pins it to
+    /// the canonical per-pool PDA `[TOKEN_VAULT_PREFIX, mint, pool]`, so it is THIS
+    /// pool's vault — not merely some token account the global pool_authority owns.
+    #[account(
+        token::mint = mint,
+        token::authority = authority,
+    )]
+    pub pool_vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init,
@@ -193,4 +276,61 @@ pub struct TransferHook<'info> {
         bump = hook_config.bump,
     )]
     pub hook_config: Account<'info, HookConfig>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SPEC-DBC-AUDIT-001 Phase 2 (REQ-E-003): the `pool_authority` PDA derived
+    /// in this program reproduces the canonical DBC `pool_authority` (documented
+    /// as `FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM` in DBC `const_pda`).
+    /// Guards the equality check used by Guard 1 against a seed/program-id typo.
+    #[test]
+    fn pool_authority_derivation_matches_dbc_canonical() {
+        let derived = derive_pool_authority();
+        let expected =
+            Pubkey::from_str_const("FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM");
+        assert_eq!(
+            derived, expected,
+            "derived pool_authority must equal DBC's canonical pool_authority"
+        );
+    }
+
+    /// A non-pool_authority signer is not the derived authority — the handler's
+    /// `require_keys_eq!` (Guard 1) would therefore reject it.
+    #[test]
+    fn random_signer_is_not_pool_authority() {
+        let random = Pubkey::new_unique();
+        assert_ne!(random, derive_pool_authority());
+    }
+
+    /// SEC-P2-02: the per-pool base vault derivation uses the canonical DBC seeds
+    /// `[TOKEN_VAULT_PREFIX, mint, pool]`. Guards Guard 3 against a seed typo.
+    #[test]
+    fn base_vault_uses_canonical_per_pool_seeds() {
+        let mint = Pubkey::new_unique();
+        let pool = Pubkey::new_unique();
+        let derived = derive_base_vault(&mint, &pool);
+        let (expected, _bump) = Pubkey::find_program_address(
+            &[b"token_vault", mint.as_ref(), pool.as_ref()],
+            &Pubkey::from_str_const("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"),
+        );
+        assert_eq!(derived, expected);
+    }
+
+    /// SEC-P2-02: the base vault is bound PER-POOL — the same mint under a
+    /// different pool yields a different vault PDA, so a vault from another pool
+    /// (even with the same mint) is rejected by Guard 3.
+    #[test]
+    fn base_vault_is_pool_specific() {
+        let mint = Pubkey::new_unique();
+        let pool_a = Pubkey::new_unique();
+        let pool_b = Pubkey::new_unique();
+        assert_ne!(
+            derive_base_vault(&mint, &pool_a),
+            derive_base_vault(&mint, &pool_b),
+            "base vault must differ per pool even for the same mint"
+        );
+    }
 }

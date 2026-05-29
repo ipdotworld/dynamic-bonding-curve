@@ -305,6 +305,11 @@ pub fn handle_initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
     }
 
     // CPI 2: HookConfig (stores pool_vault so hook knows the curve vault address)
+    // SPEC-DBC-AUDIT-001 Phase 2 (SEC-P2-02): now also passes `pool` so the hook
+    // can bind `pool_vault` to the canonical per-pool base vault
+    // `[TOKEN_VAULT_PREFIX, base_mint, pool]`. Account order MUST match the hook's
+    // `InitializeHookConfig` field order: payer, authority, mint, pool, pool_vault,
+    // hook_config, system_program.
     {
         let disc = anchor_lang::solana_program::hash::hash(
             b"global:initialize_hook_config",
@@ -315,6 +320,7 @@ pub fn handle_initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
             AccountMeta::new(ctx.accounts.payer.key(), true),
             AccountMeta::new_readonly(ctx.accounts.pool_authority.key(), true),
             AccountMeta::new_readonly(ctx.accounts.base_mint.key(), false),
+            AccountMeta::new_readonly(ctx.accounts.pool.key(), false),
             AccountMeta::new_readonly(ctx.accounts.base_vault.key(), false),
             AccountMeta::new(ctx.accounts.hook_config.key(), false),
             AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
@@ -331,6 +337,7 @@ pub fn handle_initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
                 ctx.accounts.payer.to_account_info(),
                 ctx.accounts.pool_authority.to_account_info(),
                 ctx.accounts.base_mint.to_account_info(),
+                ctx.accounts.pool.to_account_info(),
                 ctx.accounts.base_vault.to_account_info(),
                 ctx.accounts.hook_config.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),

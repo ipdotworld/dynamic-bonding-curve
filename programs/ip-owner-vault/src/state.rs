@@ -13,7 +13,8 @@ use crate::error::VaultError;
 ///   total_claimed                     :  8 bytes
 ///   vesting_start_unix_timestamp      :  8 bytes
 ///   bump                              :  1 byte
-///   _padding                          : 63 bytes (reserved for future fields)
+///   pool                              : 32 bytes (SEC-P2-01: authorizing pool)
+///   _padding                          : 31 bytes (reserved for future fields)
 ///   ──────────────────────────────────────────────
 ///   Total                             : 120 bytes (multiple of 8 → no Pod tail padding)
 ///
@@ -43,16 +44,29 @@ pub struct Vault {
     /// PDA bump.
     pub bump: u8,
 
+    /// The DBC `VirtualPool` authorized to claim from this vault.
+    ///
+    /// SPEC-DBC-AUDIT-001 Phase 2 (SEC-P2-01): the vault is keyed only by
+    /// `token_mint` (the quote mint), which carries NO link to the pool whose
+    /// `TokenVerification.ip_owner` may drain it. Without binding a specific
+    /// pool, an attacker who is the `ip_owner` of ANY pool could present their
+    /// own `(pool, TokenVerification)` pair to `claim_vested` and drain a vault
+    /// funded by a different pool. We record the authorizing pool on the FIRST
+    /// deposit — which is gated to the DBC `pool_authority` CPI, so the recorded
+    /// pool is trustworthy — and require every subsequent deposit and every claim
+    /// to present that same pool. `Pubkey::default()` until the first deposit.
+    pub pool: Pubkey,
+
     /// Reserved padding for future extensions (e.g. multi-stage vesting,
     /// per-deposit cliffs). Held flat so adding a field later does NOT bump
     /// `INIT_SPACE` and break on-chain account allocations.
-    pub _padding: [u8; 63],
+    pub _padding: [u8; 31],
 }
 
 impl Vault {
     /// Discriminator-less account size (Anchor adds the 8-byte discriminator
     /// outside `INIT_SPACE`; pass `space = 8 + Vault::INIT_SPACE` to `init`).
-    pub const INIT_SPACE: usize = 32 + 8 + 8 + 8 + 1 + 63;
+    pub const INIT_SPACE: usize = 32 + 8 + 8 + 8 + 1 + 32 + 31;
 
     /// Released amount under the linear vesting formula:
     ///
@@ -138,13 +152,33 @@ impl Vault {
             .ok_or(error!(VaultError::MathOverflow))?;
         Ok(())
     }
+
+    /// Bind the authorizing pool on first deposit, or enforce the binding on
+    /// later deposits (SEC-P2-01).
+    ///
+    /// First deposit (`self.pool == Pubkey::default()`): record `pool`.
+    /// Subsequent deposits: require the supplied `pool` to match the recorded
+    /// one, otherwise reject — this prevents a second pool (e.g. an attacker's
+    /// pool sharing the same quote mint) from commingling deposits into a vault
+    /// already bound to a different pool.
+    ///
+    /// Trustworthiness: callers MUST gate `distribute_to_vault` so this runs
+    /// only under the DBC `pool_authority` CPI (see `handle_distribute_to_vault`),
+    /// so the recorded pool cannot be poisoned by a permissionless direct call.
+    pub fn bind_or_check_pool(&mut self, pool: Pubkey) -> Result<()> {
+        if self.pool == Pubkey::default() {
+            self.pool = pool;
+        } else {
+            require_keys_eq!(self.pool, pool, VaultError::PoolMismatch);
+        }
+        Ok(())
+    }
 }
 
 // Compile-time guard: any layout regression flips this assertion at build time.
 const_assert_eq!(Vault::INIT_SPACE, 120);
 
-// Manual Default impl — derive(Default) does not handle `[u8; 63]` because
-// `Default` is implemented for arrays only up to length 32 in core.
+// Manual Default impl — retained for explicitness across the layout change.
 impl Default for Vault {
     fn default() -> Self {
         Self {
@@ -153,7 +187,8 @@ impl Default for Vault {
             total_claimed: 0,
             vesting_start_unix_timestamp: 0,
             bump: 0,
-            _padding: [0u8; 63],
+            pool: Pubkey::default(),
+            _padding: [0u8; 31],
         }
     }
 }
@@ -165,13 +200,45 @@ mod tests {
 
     fn make_vault(total_deposited: u64, total_claimed: u64, vesting_start: i64) -> Vault {
         Vault {
-            token_mint: Pubkey::default(),
             total_deposited,
             total_claimed,
             vesting_start_unix_timestamp: vesting_start,
-            bump: 0,
-            _padding: [0u8; 63],
+            ..Default::default()
         }
+    }
+
+    /// SEC-P2-01: first deposit records the authorizing pool; the same pool is
+    /// accepted on subsequent deposits.
+    #[test]
+    fn bind_or_check_pool_records_then_accepts_same_pool() {
+        let mut vault = Vault::default();
+        let pool_a = Pubkey::new_unique();
+        assert_eq!(vault.pool, Pubkey::default());
+
+        vault.bind_or_check_pool(pool_a).unwrap();
+        assert_eq!(vault.pool, pool_a, "first deposit must record the pool");
+
+        // Second deposit with the same pool passes and does not change binding.
+        vault.bind_or_check_pool(pool_a).unwrap();
+        assert_eq!(vault.pool, pool_a);
+    }
+
+    /// SEC-P2-01: once bound to pool_A, a deposit presenting a DIFFERENT pool
+    /// (e.g. an attacker's pool that shares the quote mint) is rejected — funds
+    /// cannot be commingled into a vault already bound to another pool.
+    #[test]
+    fn bind_or_check_pool_rejects_different_pool() {
+        let mut vault = Vault::default();
+        let pool_a = Pubkey::new_unique();
+        let pool_b = Pubkey::new_unique();
+
+        vault.bind_or_check_pool(pool_a).unwrap();
+        assert!(
+            vault.bind_or_check_pool(pool_b).is_err(),
+            "a second, different pool must be rejected"
+        );
+        // Binding is unchanged after the rejected attempt.
+        assert_eq!(vault.pool, pool_a);
     }
 
     #[test]

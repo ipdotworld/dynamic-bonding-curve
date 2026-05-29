@@ -27,9 +27,57 @@ use anchor_lang::solana_program::instruction::{
 use anchor_lang::solana_program::sysvar;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use crate::state::IpworldState;
+use crate::state::TokenVerification;
 use crate::state::auth_structs::TradeAuth;
 use crate::utils::verify_authority_sig::verify_authority_sig;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+
+/// Byte offset of the `referral` field inside `TokenVerification`'s account data.
+///
+/// Layout: discriminator(8) + ipa_id(32) + ip_owner(32) + pending_ip_owner(32)
+/// + ip_treasury(32) + referral(32)…  →  referral begins at 8+32+32+32+32 = 136.
+/// (See `state::token_verification::TokenVerification`.)
+const TV_REFERRAL_OFFSET: usize = 8 + 32 + 32 + 32 + 32;
+
+/// Validate the supplied `TokenVerification` account and return the registered
+/// `referral` wallet for `pool`.
+///
+/// SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003). Validation mirrors the vault's
+/// REQ-E-004 guard so the same spoof cannot be replayed on the swap path:
+///   1. the account MUST be present (referral payout requires it);
+///   2. it MUST be owned by THIS program (DBC) — defeats a self-owned look-alike;
+///   3. it MUST be the canonical PDA `[TokenVerification::SEED, pool]`;
+///   4. its discriminator MUST match Anchor's `TokenVerification` discriminator.
+/// Only then is the `referral` field (offset 136) trusted.
+fn read_verified_referral(
+    token_verification: Option<&UncheckedAccount>,
+    pool: &Pubkey,
+) -> Result<Pubkey> {
+    let tv = token_verification.ok_or(PoolError::MissingTokenVerification)?;
+
+    // (2) owner == DBC program.
+    require_keys_eq!(*tv.owner, crate::ID, PoolError::InvalidTokenVerification);
+
+    // (3) canonical PDA for this pool.
+    let (expected, _bump) =
+        Pubkey::find_program_address(&[TokenVerification::SEED, pool.as_ref()], &crate::ID);
+    require_keys_eq!(tv.key(), expected, PoolError::InvalidTokenVerification);
+
+    let data = tv.try_borrow_data()?;
+    require!(
+        data.len() >= TV_REFERRAL_OFFSET + 32,
+        PoolError::InvalidTokenVerification
+    );
+    // (4) discriminator match (first 8 bytes of sha256("account:TokenVerification")).
+    require!(
+        &data[..8] == TokenVerification::DISCRIMINATOR,
+        PoolError::InvalidTokenVerification
+    );
+
+    let mut referral_bytes = [0u8; 32];
+    referral_bytes.copy_from_slice(&data[TV_REFERRAL_OFFSET..TV_REFERRAL_OFFSET + 32]);
+    Ok(Pubkey::new_from_array(referral_bytes))
+}
 
 // only be use for swap exact in
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -116,6 +164,18 @@ pub struct SwapCtx<'info> {
     /// referral token account
     #[account(mut)]
     pub referral_token_account: Option<Box<InterfaceAccount<'info, TokenAccount>>>,
+
+    /// DBC `TokenVerification` PDA for `pool` — REQUIRED only when a referral
+    /// payout is requested (i.e. `referral_token_account` is `Some`).
+    ///
+    /// SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003): the referral fee must only be
+    /// payable to the on-chain-registered referral wallet. We read the stored
+    /// `TokenVerification.referral` and require the supplied
+    /// `referral_token_account` to be owned by it. The account is validated for
+    /// authenticity (owner == this program AND canonical PDA `[TokenVerification::SEED, pool]`)
+    /// inside the handler before any byte is trusted.
+    /// CHECK: validated in `handle_swap_wrapper` (owner + canonical PDA + discriminator).
+    pub token_verification: Option<UncheckedAccount<'info>>,
 
     // --- ipworld trade auth accounts (Step 7) ---
 
@@ -295,18 +355,44 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
     )?;
 
     // send to referral
-    if let Some(referral_token_account) = ctx.accounts.referral_token_account.as_ref() {
-        if fee_mode.fees_on_base_token {
-            transfer_token_from_pool_authority(
-                ctx.accounts.pool_authority.to_account_info(),
-                &ctx.accounts.base_mint,
-                &ctx.accounts.base_vault,
-                referral_token_account.to_account_info(),
-                &ctx.accounts.token_base_program,
-                swap_result.referral_fee,
-                ctx.remaining_accounts,
+    //
+    // SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-009): the former BUY branch
+    // (`fees_on_base_token == true`) paid a base-token referral that was ALSO
+    // folded into the base-fee counters via `total_fee` in `apply_swap_result`
+    // (that branch does NOT subtract `referral_fee`) — a double-spend out of
+    // `base_vault`. It is removed. The referral is now paid ONLY on the quote
+    // side, gated on `!fee_mode.fees_on_base_token`. This is exactly the set of
+    // cases where `apply_swap_result` EXCLUDED `referral_fee` from the on-chain
+    // counters (`distributable = total_fee - referral_fee`), so the payout here
+    // keeps fund conservation: every excluded `referral_fee` leaves the vault,
+    // and nothing that stayed in a counter is also paid out.
+    //
+    // SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003): the destination is validated against
+    // the on-chain-registered `TokenVerification.referral` for this pool. A
+    // caller-supplied `referral_token_account` is no longer trusted blindly.
+    if !fee_mode.fees_on_base_token {
+        if let Some(referral_token_account) = ctx.accounts.referral_token_account.as_ref() {
+            // `has_referral` was true (referral_token_account is Some), so the fee
+            // math allocated a (possibly non-zero) `referral_fee` and EXCLUDED it
+            // from the on-chain counters. It MUST leave the vault here, to the
+            // verified referral, or the tx must revert — skipping would strand
+            // `referral_fee` and break conservation.
+            let stored_referral = read_verified_referral(
+                ctx.accounts.token_verification.as_ref(),
+                &ctx.accounts.pool.key(),
             )?;
-        } else {
+
+            // The supplied destination MUST be owned by the registered referral.
+            // (When no referrer is configured the stored referral is the default
+            // pubkey; clients MUST then omit `referral_token_account` so
+            // `has_referral` is false and `referral_fee == 0`. Supplying one here
+            // reverts — a safe failure, never a silent drain.)
+            require_keys_eq!(
+                referral_token_account.owner,
+                stored_referral,
+                PoolError::InvalidReferralAccount
+            );
+
             transfer_token_from_pool_authority(
                 ctx.accounts.pool_authority.to_account_info(),
                 &ctx.accounts.quote_mint,
@@ -455,6 +541,56 @@ fn is_instruction_include_pool_swap(instruction: &Instruction, pool: &Pubkey) ->
         return instruction.accounts[2].pubkey.eq(pool);
     }
     false
+}
+
+#[cfg(test)]
+mod referral_validation_tests {
+    use super::*;
+    use anchor_lang::Discriminator;
+
+    /// REQ-A-003: a referral payout requested without the `TokenVerification`
+    /// account is rejected (cannot validate the destination).
+    #[test]
+    fn missing_token_verification_is_rejected() {
+        let pool = Pubkey::new_unique();
+        let res = read_verified_referral(None, &pool);
+        assert!(res.is_err(), "referral payout without TV must be rejected");
+    }
+
+    /// REQ-A-003: the referral field offset matches the `TokenVerification` layout
+    /// (discriminator + ipa_id + ip_owner + pending_ip_owner + ip_treasury = 136).
+    #[test]
+    fn referral_offset_matches_layout() {
+        assert_eq!(TV_REFERRAL_OFFSET, 136);
+        // And the field fits inside the declared account length.
+        assert!(TV_REFERRAL_OFFSET + 32 <= TokenVerification::LEN);
+    }
+
+    /// The canonical TV PDA used for validation is derived from
+    /// `[TokenVerification::SEED, pool]` against THIS program — the same seeds
+    /// every DBC instruction uses to load the account.
+    #[test]
+    fn canonical_tv_pda_uses_expected_seeds() {
+        let pool = Pubkey::new_unique();
+        let (expected, _b) =
+            Pubkey::find_program_address(&[TokenVerification::SEED, pool.as_ref()], &crate::ID);
+        let (again, _b2) =
+            Pubkey::find_program_address(&[b"token_verification", pool.as_ref()], &crate::ID);
+        assert_eq!(expected, again);
+    }
+
+    /// The discriminator we compare against is the canonical Anchor account
+    /// discriminator for `TokenVerification` (8 bytes), matching the value the
+    /// vault hard-codes for the same account.
+    #[test]
+    fn token_verification_discriminator_is_eight_bytes() {
+        assert_eq!(TokenVerification::DISCRIMINATOR.len(), 8);
+        // Same bytes the ip-owner-vault hard-codes: sha256("account:TokenVerification")[..8].
+        assert_eq!(
+            TokenVerification::DISCRIMINATOR,
+            &[0x04, 0xdf, 0x60, 0xe7, 0x1e, 0xde, 0x90, 0x82]
+        );
+    }
 }
 
 // Note: initialize_pool ix must be before swap ix and at the top level (no cpi)
