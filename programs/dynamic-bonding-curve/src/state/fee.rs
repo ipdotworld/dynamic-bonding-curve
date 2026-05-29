@@ -33,6 +33,42 @@ use crate::{
 // so the post-refactor swap output is byte-identical to the prior inline code.
 // =============================================================================
 
+// -----------------------------------------------------------------------------
+// Fixed fee-share constants (SPEC-DBC-AUDIT-001 Phase 1 — REQ-A-006)
+//
+// These replace the per-pool CONFIGURABLE share fields (`config.*_share`) on
+// both the swap path (`apply_swap_result`) and the harvest path (`ix_harvest`).
+// Hard-coding the splits removes a per-pool attack/misconfiguration surface and
+// makes the economic model auditable from source alone.
+//
+// UNIT: all three are denominated in `FEE_SHARE_PRECISION` (= 1_000_000), where
+// 1_000_000 == 100%. They are NOT basis points — a value of 400_000 means 40%,
+// not 0.04%. The suffix is intentionally NOT `_BPS` to avoid that confusion.
+//
+// TRADEOFF (accepted): shares are now fixed at compile time. Changing any split
+// requires a program upgrade (the upgrade authority must therefore be retained
+// until shares are final). A change only affects fees accrued AFTER the upgrade;
+// already-accumulated counters are untouched.
+//
+// Target proportions:
+//   BUY  (base side):  token-side airdrop 40%, ip_treasury 60% (residual).
+//   SELL (quote side): ip_owner 10%, airdrop 10%, treasury 80% (residual)
+//                      — computed over the post-referral `distributable` amount.
+// -----------------------------------------------------------------------------
+
+/// BUY-side token-airdrop share of the base fee, in `FEE_SHARE_PRECISION` units.
+/// 400_000 / 1_000_000 = 40%. The ip_treasury receives the 60% residual.
+pub(crate) const TOKEN_AIRDROP_SHARE: u32 = 400_000;
+
+/// SELL-side IP-owner share of the (post-referral) quote fee, in
+/// `FEE_SHARE_PRECISION` units. 100_000 / 1_000_000 = 10%.
+pub(crate) const IP_OWNER_SHARE: u32 = 100_000;
+
+/// SELL-side airdrop-pool share of the (post-referral) quote fee, in
+/// `FEE_SHARE_PRECISION` units. 100_000 / 1_000_000 = 10%. The treasury
+/// receives the residual (80% when ip_owner + airdrop = 20%).
+pub(crate) const AIRDROP_SHARE: u32 = 100_000;
+
 /// Distributes a SELL-side (quote) fee among three recipients (4-way model;
 /// referral is handled outside this function — see `apply_swap_result`).
 ///
@@ -229,6 +265,72 @@ impl FeeMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -------------------------------------------------------------------------
+    // SPEC-DBC-AUDIT-001 Phase 1 (REQ-A-006): fixed fee-share constants.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_fixed_share_constants_have_expected_values() {
+        // Unit is FEE_SHARE_PRECISION (1_000_000 == 100%), NOT basis points.
+        assert_eq!(FEE_SHARE_PRECISION, 1_000_000);
+        assert_eq!(TOKEN_AIRDROP_SHARE, 400_000); // 40%
+        assert_eq!(IP_OWNER_SHARE, 100_000); // 10%
+        assert_eq!(AIRDROP_SHARE, 100_000); // 10%
+    }
+
+    #[test]
+    fn test_distribute_base_fee_uses_fixed_40_60_split() {
+        // BUY side: token airdrop 40%, ip_treasury 60% residual.
+        let total_fee = 1_000u64;
+        let (token_airdrop, ip_treasury) =
+            distribute_base_fee(total_fee, TOKEN_AIRDROP_SHARE).unwrap();
+        assert_eq!(token_airdrop, 400);
+        assert_eq!(ip_treasury, 600);
+        // Conservation: the two sinks sum to exactly the input (single-counted).
+        assert_eq!(token_airdrop.checked_add(ip_treasury).unwrap(), total_fee);
+    }
+
+    #[test]
+    fn test_distribute_quote_fee_uses_fixed_10_10_residual_split() {
+        // SELL side: ip_owner 10%, airdrop 10%, treasury 80% residual.
+        let distributable = 1_000u64;
+        let (ip_owner, airdrop, treasury) =
+            distribute_quote_fee(distributable, IP_OWNER_SHARE, AIRDROP_SHARE).unwrap();
+        assert_eq!(ip_owner, 100);
+        assert_eq!(airdrop, 100);
+        assert_eq!(treasury, 800);
+        // Conservation: the three sinks sum to exactly the distributable amount.
+        assert_eq!(
+            ip_owner
+                .checked_add(airdrop)
+                .unwrap()
+                .checked_add(treasury)
+                .unwrap(),
+            distributable
+        );
+    }
+
+    #[test]
+    fn test_distribute_quote_fee_residual_absorbs_rounding_dust() {
+        // With an amount not divisible by the precision, ip_owner/airdrop round
+        // down and the treasury (residual) absorbs the dust; total is preserved.
+        let distributable = 1_001u64;
+        let (ip_owner, airdrop, treasury) =
+            distribute_quote_fee(distributable, IP_OWNER_SHARE, AIRDROP_SHARE).unwrap();
+        // floor(1001 * 0.10) == 100 for each.
+        assert_eq!(ip_owner, 100);
+        assert_eq!(airdrop, 100);
+        assert_eq!(treasury, 801);
+        assert_eq!(
+            ip_owner
+                .checked_add(airdrop)
+                .unwrap()
+                .checked_add(treasury)
+                .unwrap(),
+            distributable
+        );
+    }
 
     #[test]
     fn test_fee_mode_output_token_base_to_quote() {

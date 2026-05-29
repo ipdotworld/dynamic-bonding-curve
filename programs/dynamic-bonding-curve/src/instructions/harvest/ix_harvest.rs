@@ -6,7 +6,10 @@ use crate::{
     safe_math::SafeMath,
     state::{
         config::PoolConfig,
-        fee::{distribute_base_fee, distribute_quote_fee},
+        fee::{
+            distribute_base_fee, distribute_quote_fee, AIRDROP_SHARE, IP_OWNER_SHARE,
+            TOKEN_AIRDROP_SHARE,
+        },
         MigrationProgress, VirtualPool,
     },
     PoolError,
@@ -38,7 +41,8 @@ pub struct HarvestCtx<'info> {
     )]
     pub pool: AccountLoader<'info, VirtualPool>,
 
-    /// Pool config — holds fee share ratios.
+    /// Pool config — validated via `has_one = config`. Fee shares are fixed
+    /// program constants (REQ-A-006), so this account is not read in the handler.
     pub config: AccountLoader<'info, PoolConfig>,
 
     /// Pool authority PDA — signs the DAMM v2 CPI as the position owner.
@@ -189,8 +193,11 @@ pub fn handle_harvest<'c: 'info, 'info>(
         return Ok(());
     }
 
-    let config = ctx.accounts.config.load()?;
-
+    // SPEC-DBC-AUDIT-001 Phase 1 (REQ-A-006): the config account is still
+    // validated by the `has_one = config` constraint, but the handler no longer
+    // reads `config.*_share` — fee shares are now fixed program constants
+    // (`IP_OWNER_SHARE`, `AIRDROP_SHARE`, `TOKEN_AIRDROP_SHARE`). No `config`
+    // load is required here.
     let mut pool = ctx.accounts.pool.load_mut()?;
 
     // --- 5. Distribute collected SOL (quote) fees ---
@@ -201,11 +208,15 @@ pub fn handle_harvest<'c: 'info, 'info>(
     // is now 3-way at the helper level (ip_owner + airdrop + treasury).
     // No referral in harvest (no referral account), so the full collected
     // amount is distributable; referral share folds into treasury.
+    // SPEC-DBC-AUDIT-001 Phase 1 (REQ-A-006): use the SAME fixed program
+    // constants as the swap path (`apply_swap_result`), not mutable per-pool
+    // `config.*_share`. Harvest credits ip_owner/airdrop/treasury quote sinks;
+    // it does NOT touch `protocol_base_fee` (consistent with REQ-A-001).
     if collected_quote > 0 {
         let (ip_owner, airdrop, treasury) = distribute_quote_fee(
             collected_quote,
-            config.ip_owner_share,
-            config.airdrop_share,
+            IP_OWNER_SHARE,
+            AIRDROP_SHARE,
         )?;
 
         pool.ip_owner_quote_fee = pool.ip_owner_quote_fee.safe_add(ip_owner)?;
@@ -218,8 +229,9 @@ pub fn handle_harvest<'c: 'info, 'info>(
     // `apply_swap_result` base distribution. Implementation centralized in
     // `state::fee::distribute_base_fee`.
     if collected_base > 0 {
+        // REQ-A-006: fixed `TOKEN_AIRDROP_SHARE` (40%), ip_treasury gets residual.
         let (token_airdrop, ip_treasury) =
-            distribute_base_fee(collected_base, config.token_airdrop_share)?;
+            distribute_base_fee(collected_base, TOKEN_AIRDROP_SHARE)?;
 
         pool.token_airdrop_base_fee = pool.token_airdrop_base_fee.safe_add(token_airdrop)?;
         pool.ip_treasury_base_fee = pool.ip_treasury_base_fee.safe_add(ip_treasury)?;
