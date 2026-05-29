@@ -74,12 +74,20 @@ pub const HOLDING_CAP_PERCENT: u128 = 5;
 /// constructing Token-2022 accounts.
 ///
 /// # Arguments
-/// * `dest_balance`    — the destination token account's CURRENT `amount`
-///   (pre-transfer balance).
-/// * `transfer_amount` — the Execute `amount` (the quantity being transferred).
+/// * `dest_balance`    — the destination token account's `amount`. This pure
+///   helper is timing-AGNOSTIC: it simply forms `post = dest_balance +
+///   transfer_amount`. The live Execute path (`execute_holding_cap_decision`)
+///   passes the POST-transfer balance here with `transfer_amount = 0` because
+///   Token-2022 credits the destination BEFORE invoking the hook (see that
+///   wrapper + `transfer_hook` for the spl-token-2022 v6.0.0 citation). Callers
+///   wanting pre-transfer semantics would instead pass the pre-credit balance
+///   and a non-zero `transfer_amount`.
+/// * `transfer_amount` — quantity to add to `dest_balance` before the cap check.
+///   The Execute path passes `0` (balance is already post-credit); a
+///   pre-transfer caller would pass the in-flight amount.
 /// * `total_supply`    — the mint's `supply`.
-/// * `is_exempt`       — true if the recipient is an exempt wallet (pool vault,
-///   airdrop, treasury). Exempt recipients bypass the cap entirely.
+/// * `is_exempt`       — true if the recipient is an exempt wallet (pool vault).
+///   Exempt recipients bypass the cap entirely.
 ///
 /// # The exact comparison
 /// Let `post = dest_balance + transfer_amount`. The transfer is REJECTED iff
@@ -128,6 +136,44 @@ pub fn holding_cap_allows(
         return Err(HookError::HoldingCapExceeded);
     }
     Ok(())
+}
+
+/// Execute-level cap decision (REQ-B-001) — the EXACT logic the live
+/// `transfer_hook` runs, factored into a pure function so the WIRING (not just
+/// the raw math) is unit-testable without a Token-2022 runtime.
+///
+/// Encodes two production-critical choices:
+///   1. POOL-VAULT-ONLY exemption: `is_exempt = (dst == pool_vault)`. The pool
+///      vault is the sole exempt recipient (operator decision 2026-05-29);
+///      airdrop/treasury are NOT exempt.
+///   2. POST-transfer balance semantics: `dest_balance_after` is the
+///      destination's balance AFTER Token-2022 has already credited the
+///      transfer (verified against spl-token-2022 v6.0.0 — the hook fires after
+///      the credit + borrow-drop). It is passed straight through as the post
+///      balance with `transfer_amount = 0` so `amount` is NOT double-counted.
+///
+/// A regression that reverts to pre-transfer semantics (re-adding `amount`)
+/// would change this function's boundary and is caught by
+/// `execute_cap_does_not_double_count_amount`.
+///
+/// # Arguments
+/// * `dest_balance_after` — `destination_token.amount` read inside Execute
+///   (already credited; POST-transfer).
+/// * `total_supply`       — `mint.supply` read inside Execute.
+/// * `dst_is_pool_vault`  — whether the destination token account == the stored
+///   `hook_config.pool_vault`.
+pub fn execute_holding_cap_decision(
+    dest_balance_after: u64,
+    total_supply: u64,
+    dst_is_pool_vault: bool,
+) -> std::result::Result<(), HookError> {
+    let is_exempt = dst_is_pool_vault;
+    holding_cap_allows(
+        dest_balance_after,
+        0, // POST-transfer: destination already credited — do not re-add `amount`.
+        total_supply,
+        is_exempt,
+    )
 }
 
 
@@ -248,43 +294,45 @@ pub mod ipworld_hook {
             HookError::TransferNotThroughCurve
         );
 
-        // REQ-B-001 (5% holding cap): the decision LOGIC is implemented and
-        // unit-tested as the pure helper `holding_cap_allows(dest_balance,
-        // transfer_amount, total_supply, is_exempt)`. It is intentionally NOT
-        // activated on this live path yet, because doing so soundly requires the
-        // set of EXEMPT recipients, and that set is NOT determinable here:
-        //   - pool vault: known (cfg.pool_vault) and always exempt. ✓
-        //   - airdrop wallet: NOT a fixed/stable address. Base-token airdrop
-        //     fees accumulate in `pool.token_airdrop_base_fee` and are drained
-        //     by an operator (ClaimAirdrop permission) to an OPERATOR-SUPPLIED
-        //     destination chosen per-claim — there is no single airdrop wallet
-        //     to record at hook-config time, and a stored one would be wrong the
-        //     moment the operator drains to a different account.
-        //   - treasury wallet: `ip_treasury` is set AFTER pool creation
-        //     (`set_ip_treasury`) and lives in the per-pool TokenVerification
-        //     account (keyed by pool, not mint) — not visible to this Execute
-        //     context and not known at hook-config time.
-        // Both airdrop and treasury claims move base tokens vault -> recipient
-        // signed by `pool_authority`, which is STRUCTURALLY identical to a BUY
-        // (vault -> buyer, also pool_authority-signed). The hook cannot tell a
-        // protocol distribution from a whale BUY, so it cannot exempt one
-        // without an explicit recipient allow-list — which the airdrop side
-        // makes impossible without an out-of-scope change to the operator/claim
-        // instructions or the hook account model.
+        // REQ-B-001 (5% holding cap, ACTIVATED): a NON-exempt recipient may not
+        // end a transfer holding strictly more than 5% of the mint's supply. The
+        // POOL VAULT is the ONLY exempt recipient (operator decision 2026-05-29):
+        // it holds ~all supply pre-graduation, so it MUST bypass the cap or the
+        // curve would be bricked. airdrop/treasury are intentionally NOT exempt
+        // (operator will split any rare >5% claim), which keeps the hook needing
+        // only `cfg.pool_vault` (already stored) — no new exempt-source plumbing.
         //
-        // Per SPEC §"If the exempt addresses (airdrop/treasury) are NOT
-        // determinable at hook-config time ... STOP and report rather than
-        // guessing", the live wiring is deferred to a human decision on the
-        // exempt-source mechanism. Activating it now with a single stored
-        // airdrop/treasury wallet would BRICK any legitimate airdrop/treasury
-        // claim whose recipient legitimately exceeds 5% of supply.
+        // BALANCE TIMING (critical — verified against spl-token-2022 v6.0.0
+        // `processor.rs::process_transfer`, the version this hook links):
+        //   1. the destination account's `amount` is CREDITED
+        //      (`destination_account.base.amount += credited_amount`, L487-490);
+        //   2. the account data borrows are dropped, flushing that balance
+        //      (L524-525);
+        //   3. ONLY THEN is the hook invoked via
+        //      `spl_transfer_hook_interface::onchain::invoke_execute(... amount)`
+        //      (L526-534).
+        // => `destination_token.amount` here is the POST-transfer balance (the
+        // destination is ALREADY credited). `execute_holding_cap_decision`
+        // therefore passes it through with `transfer_amount = 0` so `amount` is
+        // NOT double-counted. Re-adding `amount` would shift the boundary by one
+        // transfer and wrongly reject a recipient landing at exactly 5%.
+        // (IPWorld mints carry no TransferFee extension, so the credited amount
+        // equals `amount`; reading the actual post-credit balance is correct
+        // regardless of any fee.)
         //
-        // Once the exempt mechanism is decided, activation is one line:
-        //   let dest_balance = ctx.accounts.destination_token.amount;
-        //   let total_supply = ctx.accounts.mint.supply;
-        //   let is_exempt = dst == cfg.pool_vault /* || dst is airdrop/treasury */;
-        //   holding_cap_allows(dest_balance, amount, total_supply, is_exempt)?;
-        let _ = amount; // see note above — `amount` will feed `holding_cap_allows` once wired.
+        // GRADUATION: this check only runs pre-graduation (the migration nulls
+        // the hook on the mint — see the doc-comment above), so no is_migrated
+        // guard is needed; post-graduation the hook is never called.
+        execute_holding_cap_decision(
+            ctx.accounts.destination_token.amount, // POST-transfer balance
+            ctx.accounts.mint.supply,
+            dst == cfg.pool_vault, // pool vault is the only exempt recipient
+        )
+        .map_err(|e| error!(e))?;
+
+        // `amount` (the Execute arg) is intentionally unused: the destination
+        // balance is already post-transfer. Kept bound for the fallback wiring.
+        let _ = amount;
 
         Ok(())
     }
@@ -558,5 +606,86 @@ mod tests {
     fn cap_zero_supply_edge() {
         assert!(rejected(holding_cap_allows(0, 1, 0, false)));
         assert!(allowed(holding_cap_allows(0, 0, 0, false)));
+    }
+
+    // =====================================================================
+    // SPEC-DBC-AUDIT-001 Phase 6 (REQ-B-001): Execute-level WIRING tests.
+    // These pin the LIVE `transfer_hook` decision (via the shared
+    // `execute_holding_cap_decision`): pool-vault-only exemption + POST-transfer
+    // balance semantics. Full Token-2022 Execute simulation needs a
+    // solana-program-test / litesvm harness (not set up here) — that end-to-end
+    // path is a ts-mocha follow-up. These unit tests exercise the exact decision
+    // the handler runs, so a regression in the wiring (timing or exemption) is
+    // caught here. `dec()`/`rej()` mirror `allowed()`/`rejected()`.
+    // =====================================================================
+
+    fn rej(r: std::result::Result<(), HookError>) -> bool {
+        matches!(r, Err(HookError::HoldingCapExceeded))
+    }
+    fn dec_ok(r: std::result::Result<(), HookError>) -> bool {
+        r.is_ok()
+    }
+
+    /// (req #5 case 1) A NON-vault recipient whose POST-transfer balance is > 5%
+    /// is REJECTED. dest already holds 50_000 (=5%), so post-credit landing at
+    /// 50_001 (the value the hook reads) is over the cap.
+    #[test]
+    fn execute_non_vault_recipient_over_5pct_rejected() {
+        // dst_is_pool_vault = false; post-transfer balance already includes the credit.
+        assert!(rej(execute_holding_cap_decision(FIVE_PCT + 1, SUPPLY, false)));
+    }
+
+    /// (req #5 case 2) The POOL VAULT recipient is NEVER blocked — e.g. a SELL
+    /// back into the curve where the vault ends up holding essentially all
+    /// supply. Exempt regardless of how far over 5% the post-balance is.
+    #[test]
+    fn execute_pool_vault_recipient_never_blocked() {
+        // vault post-balance = entire supply: still allowed.
+        assert!(dec_ok(execute_holding_cap_decision(SUPPLY, SUPPLY, true)));
+        // even the value that rejects a non-vault recipient passes for the vault.
+        assert!(rej(execute_holding_cap_decision(FIVE_PCT + 1, SUPPLY, false)));
+        assert!(dec_ok(execute_holding_cap_decision(FIVE_PCT + 1, SUPPLY, true)));
+    }
+
+    /// (req #5 case 3) Exactly-5% POST-transfer balance to a non-vault recipient
+    /// is ALLOWED (inclusive boundary); one unit more is the first rejection.
+    #[test]
+    fn execute_exactly_5pct_boundary_allowed() {
+        assert!(dec_ok(execute_holding_cap_decision(FIVE_PCT, SUPPLY, false)));
+        assert!(rej(execute_holding_cap_decision(FIVE_PCT + 1, SUPPLY, false)));
+    }
+
+    /// TIMING REGRESSION PIN (the off-by-one-transfer guard from req #2): the
+    /// Execute decision must treat its balance arg as POST-transfer and NOT
+    /// re-add the transfer amount. Concretely: a recipient whose POST-transfer
+    /// balance is EXACTLY 5% must be ALLOWED. If a future change reverted to
+    /// pre-transfer semantics by calling `holding_cap_allows(balance, amount,
+    /// ...)` with a non-zero `amount`, that same recipient would be computed at
+    /// `5% + amount` and wrongly REJECTED. This test fails loudly on that
+    /// regression: it asserts the post-transfer reading (transfer_amount = 0)
+    /// is what `execute_holding_cap_decision` uses.
+    #[test]
+    fn execute_cap_does_not_double_count_amount() {
+        // POST-transfer balance == exactly 5% → allowed (correct behavior).
+        assert!(dec_ok(execute_holding_cap_decision(FIVE_PCT, SUPPLY, false)));
+
+        // Demonstrate the contrast that proves no double-counting: the WRONG
+        // (pre-transfer) call shape — passing the just-transferred amount on top
+        // of an already-post-transfer balance — WOULD reject exactly-5%.
+        let wrong_pre_transfer_shape =
+            holding_cap_allows(FIVE_PCT, 1, SUPPLY, false); // balance already 5%, re-adding 1
+        assert!(rejected(wrong_pre_transfer_shape));
+        // The production path must NOT behave like the wrong shape:
+        assert!(dec_ok(execute_holding_cap_decision(FIVE_PCT, SUPPLY, false)));
+    }
+
+    /// The exemption flag in the Execute decision is driven SOLELY by
+    /// `dst_is_pool_vault` (operator decision: pool vault is the only exempt
+    /// recipient). Same numbers, only the vault flag flips the outcome.
+    #[test]
+    fn execute_exemption_is_pool_vault_only() {
+        let over = FIVE_PCT + 1;
+        assert!(rej(execute_holding_cap_decision(over, SUPPLY, false))); // non-vault: blocked
+        assert!(dec_ok(execute_holding_cap_decision(over, SUPPLY, true))); // vault: allowed
     }
 }
