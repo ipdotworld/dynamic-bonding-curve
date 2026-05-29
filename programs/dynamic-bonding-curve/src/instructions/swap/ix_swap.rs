@@ -217,6 +217,9 @@ pub fn handle_swap_wrapper<'c: 'info, 'info>(
     // --- Verify backend-signed TradeAuth (buys only) ---
     // Sells (BaseToQuote) are always allowed so users can exit even if
     // the auth backend is unavailable.
+    // SPEC-DBC-AUDIT-001 REQ-D-005 (ACCEPTED RISK): TradeAuth.expires_at has no
+    // on-chain TTL cap; a leaked signature is replayable platform-wide until expiry.
+    // Accepted under backend-trust (see auth_structs.rs TradeAuth + Risk Register RR-10).
     if trade_direction == TradeDirection::QuoteToBase {
         let trade_auth: TradeAuth = verify_authority_sig(
             &ctx.accounts.instructions_sysvar,

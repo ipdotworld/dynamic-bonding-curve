@@ -46,6 +46,11 @@ pub struct ClaimAirdropFeeCtx<'info> {
     #[account(mut, token::mint = quote_mint)]
     pub quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    // SPEC-DBC-AUDIT-001 REQ-A-008 (SEC-CORE-05): the airdrop fee destinations
+    // below are operator-chosen and intentionally UNCONSTRAINED (only the mint is
+    // checked). This is a trusted-operator assumption consistent with the EVM model
+    // (operator-chosen destination); the ClaimAirdrop operator is trusted to direct
+    // funds correctly. No on-chain destination constraint is added by design.
     /// Destination token account for the base (token) airdrop fees.
     #[account(mut, token::mint = base_mint)]
     pub airdrop_base_token_account: Box<InterfaceAccount<'info, TokenAccount>>,

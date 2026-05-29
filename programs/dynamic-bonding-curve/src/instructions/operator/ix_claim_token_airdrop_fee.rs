@@ -51,6 +51,11 @@ pub struct ClaimTokenAirdropFeeCtx<'info> {
 
     /// Destination token account for the base (token) airdrop fees.
     /// Owner is the operator-controlled airdrop authority off-chain.
+    ///
+    /// SPEC-DBC-AUDIT-001 REQ-A-008 (SEC-CORE-05): this destination is operator-chosen
+    /// and intentionally UNCONSTRAINED (only the mint is checked) — a trusted-operator
+    /// assumption consistent with the EVM model. No on-chain destination constraint is
+    /// added by design.
     #[account(mut, token::mint = base_mint)]
     pub airdrop_base_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 

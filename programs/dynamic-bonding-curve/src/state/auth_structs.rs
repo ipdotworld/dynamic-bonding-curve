@@ -15,6 +15,11 @@ pub struct LaunchAuth {
 
 /// Signed by backend to authorize trading. Reusable within the TTL window.
 /// Platform-wide (not per-pool) — user can trade any pool until expiry.
+///
+/// SPEC-DBC-AUDIT-001 REQ-D-005 (D5, ACCEPTED RISK): `expires_at` is a backend-set
+/// TTL with NO on-chain cap, so a leaked TradeAuth signature has a platform-wide
+/// blast radius until expiry. Accepted under the backend-trust assumption; no
+/// on-chain TTL cap is added (out of scope). See Risk Register RR-10.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct TradeAuth {
     /// Must match the payer/signer of the swap tx
