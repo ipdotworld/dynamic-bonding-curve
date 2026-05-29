@@ -126,9 +126,12 @@ describe.skip("Rate limiter", () => {
 
     virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
-    let totalTradingFee = virtualPoolState.partnerQuoteFee.add(
-      virtualPoolState.protocolQuoteFee
-    );
+    // SPEC-DBC-AUDIT-001: `partnerQuoteFee` (legacy LP fee bucket) is now zeroed
+    // padding. The non-protocol quote trading fee is split into IPWorld buckets
+    // (ipOwnerQuoteFee + airdropQuoteFee). Total = those + protocolQuoteFee.
+    let totalTradingFee = virtualPoolState.ipOwnerQuoteFee
+      .add(virtualPoolState.airdropQuoteFee)
+      .add(virtualPoolState.protocolQuoteFee);
     expect(totalTradingFee.toNumber()).eq(
       referenceAmount.div(new BN(100)).toNumber()
     );
@@ -148,9 +151,9 @@ describe.skip("Rate limiter", () => {
 
     virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
-    let totalTradingFee1 = virtualPoolState.partnerQuoteFee.add(
-      virtualPoolState.protocolQuoteFee
-    );
+    let totalTradingFee1 = virtualPoolState.ipOwnerQuoteFee
+      .add(virtualPoolState.airdropQuoteFee)
+      .add(virtualPoolState.protocolQuoteFee);
     let deltaTradingFee = totalTradingFee1.sub(totalTradingFee);
     expect(deltaTradingFee.toNumber()).gt(
       referenceAmount.mul(new BN(2)).div(new BN(100)).toNumber()
@@ -174,9 +177,9 @@ describe.skip("Rate limiter", () => {
 
     virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
-    let totalTradingFee2 = virtualPoolState.partnerQuoteFee.add(
-      virtualPoolState.protocolQuoteFee
-    );
+    let totalTradingFee2 = virtualPoolState.ipOwnerQuoteFee
+      .add(virtualPoolState.airdropQuoteFee)
+      .add(virtualPoolState.protocolQuoteFee);
     let deltaTradingFee1 = totalTradingFee2.sub(totalTradingFee1);
     expect(deltaTradingFee1.toNumber()).eq(
       referenceAmount.mul(new BN(2)).div(new BN(100)).toNumber()

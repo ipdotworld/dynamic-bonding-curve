@@ -232,7 +232,7 @@ describe("Step 7 — Trade Auth enforcement", () => {
 
   async function buildSwapIx(payer: Keypair): Promise<import("@solana/web3.js").TransactionInstruction> {
     return await program.methods
-      .swap2({ amount0: new BN(LAMPORTS_PER_SOL * 0.01), amount1: new BN(0), swapMode: 1 })
+      .swap({ amount0: new BN(LAMPORTS_PER_SOL * 0.01), amount1: new BN(0), swapMode: 1 })
       .accountsPartial({
         poolAuthority: derivePoolAuthority(),
         config,
@@ -247,6 +247,9 @@ describe("Step 7 — Trade Auth enforcement", () => {
         tokenBaseProgram: TOKEN_2022_PROGRAM_ID,
         tokenQuoteProgram: TOKEN_PROGRAM_ID,
         referralTokenAccount: null,
+        // SPEC-DBC-AUDIT-001: swap requires the optional tokenVerification
+        // account passed explicitly (null when no referral payout).
+        tokenVerification: null,
         ipworldState,
         instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })

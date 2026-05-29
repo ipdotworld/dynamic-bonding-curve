@@ -8,12 +8,10 @@ import {
 } from "./common";
 import { DynamicAmm } from "./idl/dynamic_amm";
 import {
-  ClaimFeeOperator,
   DammV1Pool,
   DammV2Pool,
   DynamicVault,
   LockEscrow,
-  MeteoraDammMigrationMetadata,
   PartnerMetadata,
   Pool,
   PoolConfig,
@@ -67,27 +65,27 @@ export function getVirtualPoolMetadata(
   );
 }
 
+// SPEC-DBC-AUDIT-001: the ClaimFeeOperator account and the
+// MeteoraDammMigrationMetadata account were removed from the program. Their
+// fetchers are retained as throwing stubs (only legacy/quarantined tests
+// referenced them) so imports resolve while surfacing a clear error on use.
 export function getClaimFeeOperator(
-  svm: LiteSVM,
-  program: VirtualCurveProgram,
-  claimFeeOperator: PublicKey
-): ClaimFeeOperator {
-  const account = svm.getAccount(claimFeeOperator);
-  return program.coder.accounts.decode(
-    "claimFeeOperator",
-    Buffer.from(account.data)
+  _svm: LiteSVM,
+  _program: VirtualCurveProgram,
+  _claimFeeOperator: PublicKey
+): any {
+  throw new Error(
+    "getClaimFeeOperator removed (ClaimFeeOperator account deleted)."
   );
 }
 
 export function getMeteoraDammMigrationMetadata(
-  svm: LiteSVM,
-  program: VirtualCurveProgram,
-  migrationMetadata: PublicKey
-): MeteoraDammMigrationMetadata {
-  const account = svm.getAccount(migrationMetadata);
-  return program.coder.accounts.decode(
-    "meteoraDammMigrationMetadata",
-    Buffer.from(account.data)
+  _svm: LiteSVM,
+  _program: VirtualCurveProgram,
+  _migrationMetadata: PublicKey
+): any {
+  throw new Error(
+    "getMeteoraDammMigrationMetadata removed (DAMM v2 metadata account deleted)."
   );
 }
 

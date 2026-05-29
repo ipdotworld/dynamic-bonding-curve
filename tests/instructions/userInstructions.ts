@@ -33,6 +33,7 @@ import {
   derivePoolAddress,
   derivePoolAuthority,
   deriveTokenVaultAddress,
+  deriveTokenVerificationAddress,
 } from "../utils/accounts";
 import { IPWORLD_HOOK_PROGRAM_ID } from "../utils/constants";
 import {
@@ -60,51 +61,22 @@ export type CreatePoolSplTokenParams = {
 export type CreatePoolToken2022Params = CreatePoolSplTokenParams;
 
 export async function createInitializePoolWithSplTokenIx(
-  svm: LiteSVM,
-  program: VirtualCurveProgram,
-  params: CreatePoolSplTokenParams
+  _svm: LiteSVM,
+  _program: VirtualCurveProgram,
+  _params: CreatePoolSplTokenParams
 ): Promise<{
   instruction: TransactionInstruction;
   pool: PublicKey;
   baseMintKP: Keypair;
 }> {
-  const { payer, quoteMint, poolCreator, config, instructionParams } = params;
-  const configState = getConfig(svm, program, config);
-
-  const poolAuthority = derivePoolAuthority();
-  const baseMintKP = Keypair.generate();
-  const pool = derivePoolAddress(config, baseMintKP.publicKey, quoteMint);
-  const baseVault = deriveTokenVaultAddress(baseMintKP.publicKey, pool);
-  const quoteVault = deriveTokenVaultAddress(quoteMint, pool);
-
-  const mintMetadata = deriveMetadataAccount(baseMintKP.publicKey);
-
-  const tokenProgram =
-  configState.tokenType == 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
-  const instruction = await program.methods
-    .initializeVirtualPoolWithSplToken(instructionParams)
-    .accountsPartial({
-      config,
-      baseMint: baseMintKP.publicKey,
-      quoteMint,
-      pool,
-      payer: payer.publicKey,
-      creator: poolCreator.publicKey,
-      poolAuthority,
-      baseVault,
-      quoteVault,
-      mintMetadata,
-      metadataProgram: METAPLEX_PROGRAM_ID,
-      tokenQuoteProgram: TOKEN_PROGRAM_ID,
-      tokenProgram,
-    })
-    .instruction();
-
-  return {
-    instruction,
-    pool,
-    baseMintKP,
-  };
+  // SPEC-DBC-AUDIT-001 (S-02): initialize_virtual_pool_with_spl_token was DELETED
+  // — IPWorld is Token-2022 only. There is no single-instruction SPL pool-create
+  // builder anymore; use createPoolWithToken2022 (which also emits the required
+  // Ed25519 LaunchAuth pre-instruction).
+  throw new Error(
+    "createInitializePoolWithSplTokenIx removed (S-02: SPL pool creation deleted, " +
+      "Token-2022 only). Use createPoolWithToken2022."
+  );
 }
 
 export async function createPoolWithSplToken(
@@ -288,7 +260,7 @@ export async function swapPartialFill(
   preInstructions.push(buildEd25519Ix(authority, tradeAuthMsg));
 
   const transaction = await program.methods
-    .swap2({
+    .swap({
       amount0: amountIn,
       amount1: minimumAmountOut,
       swapMode: 1,
@@ -307,6 +279,12 @@ export async function swapPartialFill(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      // SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003): swap requires the pool's
+      // TokenVerification PDA whenever a referral payout is requested; anchor
+      // still wants the optional account passed explicitly (null when no referral).
+      tokenVerification: referralTokenAccount
+        ? deriveTokenVerificationAddress(pool)
+        : null,
       ipworldState: deriveIpworldStateAddress(),
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
@@ -444,7 +422,7 @@ export async function swap(
   preInstructions.push(buildEd25519Ix(authority, tradeAuthMsg));
 
   const transaction = await program.methods
-    .swap2({ amount0: amountIn, amount1: minimumAmountOut, swapMode: swapMode })
+    .swap({ amount0: amountIn, amount1: minimumAmountOut, swapMode: swapMode })
     .accountsPartial({
       poolAuthority,
       config,
@@ -459,6 +437,12 @@ export async function swap(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      // SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003): swap requires the pool's
+      // TokenVerification PDA whenever a referral payout is requested; anchor
+      // still wants the optional account passed explicitly (null when no referral).
+      tokenVerification: referralTokenAccount
+        ? deriveTokenVerificationAddress(pool)
+        : null,
       ipworldState: deriveIpworldStateAddress(),
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
@@ -568,7 +552,7 @@ export async function getSwap2Instruction(
   ];
 
   const instruction = await program.methods
-    .swap2({
+    .swap({
       amount0: amountIn,
       amount1: minimumAmountOut,
       swapMode: 0,
@@ -587,6 +571,12 @@ export async function getSwap2Instruction(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      // SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003): swap requires the pool's
+      // TokenVerification PDA whenever a referral payout is requested; anchor
+      // still wants the optional account passed explicitly (null when no referral).
+      tokenVerification: referralTokenAccount
+        ? deriveTokenVerificationAddress(pool)
+        : null,
       ipworldState: deriveIpworldStateAddress(),
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
@@ -653,10 +643,13 @@ export async function getSwapInstruction(
     ),
   ];
 
+  // SPEC-DBC-AUDIT-001: legacy `swap` (SwapParameters{amountIn,minimumAmountOut})
+  // was deleted; `swap2` was renamed to `swap` and takes SwapParameters2.
   const instruction = await program.methods
     .swap({
-      amountIn,
-      minimumAmountOut,
+      amount0: amountIn,
+      amount1: minimumAmountOut,
+      swapMode: SwapMode.ExactIn,
     })
     .accountsPartial({
       poolAuthority,
@@ -672,6 +665,12 @@ export async function getSwapInstruction(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      // SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003): swap requires the pool's
+      // TokenVerification PDA whenever a referral payout is requested; anchor
+      // still wants the optional account passed explicitly (null when no referral).
+      tokenVerification: referralTokenAccount
+        ? deriveTokenVerificationAddress(pool)
+        : null,
       ipworldState: deriveIpworldStateAddress(),
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
@@ -772,7 +771,7 @@ export async function swap2(
   preInstructions.push(buildEd25519Ix(authority, tradeAuthMsg));
 
   const transaction = await program.methods
-    .swap2({
+    .swap({
       amount0: amountIn,
       amount1: minimumAmountOut,
       swapMode,
@@ -791,6 +790,12 @@ export async function swap2(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      // SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003): swap requires the pool's
+      // TokenVerification PDA whenever a referral payout is requested; anchor
+      // still wants the optional account passed explicitly (null when no referral).
+      tokenVerification: referralTokenAccount
+        ? deriveTokenVerificationAddress(pool)
+        : null,
       ipworldState: deriveIpworldStateAddress(),
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })
@@ -900,7 +905,7 @@ export async function swapSimulate(
   const ed25519Ix = buildEd25519Ix(authority, tradeAuthMsg);
 
   const swap2Ix = await program.methods
-    .swap2({
+    .swap({
       amount0: amountIn,
       amount1: minimumAmountOut,
       swapMode: SwapMode.PartialFill,
@@ -919,6 +924,12 @@ export async function swapSimulate(
       tokenBaseProgram,
       tokenQuoteProgram: TOKEN_PROGRAM_ID,
       referralTokenAccount,
+      // SPEC-DBC-AUDIT-001 Phase 2 (REQ-A-003): swap requires the pool's
+      // TokenVerification PDA whenever a referral payout is requested; anchor
+      // still wants the optional account passed explicitly (null when no referral).
+      tokenVerification: referralTokenAccount
+        ? deriveTokenVerificationAddress(pool)
+        : null,
       ipworldState: deriveIpworldStateAddress(),
       instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
     })

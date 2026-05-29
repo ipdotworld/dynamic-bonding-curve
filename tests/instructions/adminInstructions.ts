@@ -3,7 +3,6 @@ import { Keypair, PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { expect } from "chai";
 import { LiteSVM } from "litesvm";
 import {
-  getClaimFeeOperator,
   getConfig,
   getOrCreateAssociatedTokenAccount,
   getTokenAccount,
@@ -13,16 +12,21 @@ import {
   U64_MAX,
 } from "../utils";
 import {
-  deriveClaimFeeOperatorAddress,
   deriveOperatorAddress,
   derivePoolAuthority,
 } from "../utils/accounts";
 import { VirtualCurveProgram } from "../utils/types";
 import BN from "bn.js";
 
+// SPEC-DBC-AUDIT-001: single-role-per-Operator permission model. Permission is
+// a single bit position; create_operator_account REJECTS multi-bit values.
+// Bit map (gaps at 1 and 4 — Backend / _Reserved1 were REMOVED):
+//   ClaimProtocolFee = 0, VerifyToken = 2, ClaimAirdrop = 3.
+// A backend entity needing two roles holds two single-role Operator accounts.
 export enum OperatorPermission {
-  ClaimProtocolFee,
-  ZapProtocolFee,
+  ClaimProtocolFee = 0,
+  VerifyToken = 2,
+  ClaimAirdrop = 3,
 }
 
 export function encodePermissions(permissions: OperatorPermission[]): BN {
@@ -67,33 +71,16 @@ export type ClaimProtocolPoolCreationFeeParams = {
 };
 
 export async function claimProtocolPoolCreationFee(
-  svm: LiteSVM,
-  program: VirtualCurveProgram,
-  params: ClaimProtocolPoolCreationFeeParams
+  _svm: LiteSVM,
+  _program: VirtualCurveProgram,
+  _params: ClaimProtocolPoolCreationFeeParams
 ) {
-  const { operator, pool, claimFeeOperator } = params;
-
-  const poolState = getVirtualPool(svm, program, pool);
-
-  const transaction = await program.methods
-    .claimProtocolPoolCreationFee()
-    .accountsPartial({
-      pool,
-      config: poolState.config,
-      treasury: TREASURY,
-      signer: operator.publicKey,
-      operator: deriveOperatorAddress(operator.publicKey),
-    })
-    // Trick to bypass bankrun transaction has been processed if we wish to execute same tx again
-    .remainingAccounts([
-      {
-        pubkey: PublicKey.unique(),
-        isSigner: false,
-        isWritable: false,
-      },
-    ])
-    .transaction();
-  sendTransactionMaybeThrow(svm, transaction, [operator]);
+  // SPEC-DBC-AUDIT-001: the ClaimFeeOperator cluster
+  // (claim_protocol_pool_creation_fee + close_claim_protocol_fee_operator) was
+  // REMOVED. There is no operator-claimed pool-creation-fee path anymore.
+  throw new Error(
+    "claimProtocolPoolCreationFee removed (ClaimFeeOperator cluster deleted)."
+  );
 }
 
 export type ClaimProtocolFeeParams = {

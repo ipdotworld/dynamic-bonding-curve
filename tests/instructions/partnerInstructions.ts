@@ -115,12 +115,17 @@ export type ConfigParameters = {
   enableFirstSwapWithMinFee: boolean;
   compoundingFeeBps: number;
   curve: Array<LiquidityDistributionParameters>;
-  // Fee share parameters (IPWorld 4-way SELL; SPEC-DBC-004 Phase 3 — REQ-I-001
-  // removed `creatorShare` from on-chain `PoolConfig`)
-  ipOwnerShare: number;
-  airdropShare: number;
-  referralShare: number;
-  tokenAirdropShare: number;
+  // Fee share parameters (IPWorld SELL split; SPEC-DBC-004 Phase 3 — REQ-I-001
+  // removed `creatorShare` from on-chain `PoolConfig`).
+  // SPEC-DBC-AUDIT-001 Phase 8 (REQ-A-005): `referralShare` was REMOVED from
+  // CreateConfigParameters — referral is handled per-swap, not via config.
+  // All four are optional here; `createConfig` applies defaults when omitted.
+  // `referralShare` is accepted but ignored (silently dropped) for back-compat
+  // with legacy test literals that still set it.
+  ipOwnerShare?: number;
+  airdropShare?: number;
+  referralShare?: number;
+  tokenAirdropShare?: number;
 };
 
 export type LiquidityVestingInfoParams = {
@@ -162,8 +167,12 @@ export async function createConfig(
   // dropped — `createConfig` below includes only the supported fields.
   const ipOwnerShare = instructionParams.ipOwnerShare ?? 50000;
   const airdropShare = instructionParams.airdropShare ?? 30000;
-  const referralShare = instructionParams.referralShare ?? 20000;
   const tokenAirdropShare = instructionParams.tokenAirdropShare ?? 50000;
+  // SPEC-DBC-AUDIT-001 Phase 8 (REQ-A-005): `referralShare` was removed from
+  // CreateConfigParameters. Strip it from the spread so it is never forwarded
+  // to the program (legacy literals may still set it).
+  const { referralShare: _droppedReferralShare, ...instructionParamsNoReferral } =
+    instructionParams;
 
   // Ensure collectFeeMode is OutputToken (1), not QuoteToken (0) for most
   // pools. Exception: fee rate limiter (baseFeeMode=2) requires QuoteToken
@@ -195,7 +204,7 @@ export async function createConfig(
 
   const transaction = await program.methods
     .createConfig({
-      ...instructionParams,
+      ...instructionParamsNoReferral,
       collectFeeMode,
       migrationOption,
       tokenType,
@@ -203,8 +212,8 @@ export async function createConfig(
       poolFees,
       ipOwnerShare,
       airdropShare,
-      referralShare,
       tokenAirdropShare,
+      // referralShare intentionally omitted (removed from program — REQ-A-005)
       padding: new Array(2).fill(0),
     })
     .accountsPartial({
@@ -282,89 +291,18 @@ export type ClaimTradeFeeParams = {
   maxQuoteAmount: BN;
 };
 export async function claimTradingFee(
-  svm: LiteSVM,
-  program: VirtualCurveProgram,
-  params: ClaimTradeFeeParams
+  _svm: LiteSVM,
+  _program: VirtualCurveProgram,
+  _params: ClaimTradeFeeParams
 ): Promise<any> {
-  const { feeClaimer, pool, maxBaseAmount, maxQuoteAmount } = params;
-  const poolState = getVirtualPool(svm, program, pool);
-  const configState = getConfig(svm, program, poolState.config);
-  const poolAuthority = derivePoolAuthority();
-
-  const quoteMintInfo = getTokenAccount(svm, poolState.quoteVault)!;
-
-  const tokenBaseProgram =
-    configState.tokenType == 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
-
-  const tokenQuoteProgram =
-    configState.quoteTokenFlag == 0 ? TOKEN_PROGRAM_ID : TOKEN_2022_PROGRAM_ID;
-
-  const preInstructions: TransactionInstruction[] = [];
-  const postInstructions: TransactionInstruction[] = [];
-  const [
-    { ata: baseTokenAccount, ix: createBaseTokenAccountIx },
-    { ata: quoteTokenAccount, ix: createQuoteTokenAccountIx },
-  ] = [
-      getOrCreateAssociatedTokenAccount(
-        svm,
-        feeClaimer,
-        poolState.baseMint,
-        feeClaimer.publicKey,
-        tokenBaseProgram
-      ),
-      getOrCreateAssociatedTokenAccount(
-        svm,
-        feeClaimer,
-        quoteMintInfo.mint,
-        feeClaimer.publicKey,
-        tokenQuoteProgram
-      ),
-    ];
-  createBaseTokenAccountIx && preInstructions.push(createBaseTokenAccountIx);
-  createQuoteTokenAccountIx && preInstructions.push(createQuoteTokenAccountIx);
-
-  if (configState.quoteMint == NATIVE_MINT) {
-    const unrapSOLIx = unwrapSOLInstruction(feeClaimer.publicKey);
-    unrapSOLIx && postInstructions.push(unrapSOLIx);
-  }
-  const transaction = await program.methods
-    .claimTradingFee(maxBaseAmount, maxQuoteAmount)
-    .accountsPartial({
-      poolAuthority,
-      config: poolState.config,
-      pool,
-      tokenAAccount: baseTokenAccount,
-      tokenBAccount: quoteTokenAccount,
-      baseVault: poolState.baseVault,
-      quoteVault: poolState.quoteVault,
-      baseMint: poolState.baseMint,
-      quoteMint: quoteMintInfo.mint,
-      feeClaimer: feeClaimer.publicKey,
-      tokenBaseProgram,
-      tokenQuoteProgram,
-    })
-    .remainingAccounts([
-      {
-        isSigner: false,
-        isWritable: false,
-        pubkey: IPWORLD_HOOK_PROGRAM_ID,
-      },
-      {
-        isSigner: false,
-        isWritable: false,
-        pubkey: deriveExtraAccountMetaListAddress(poolState.baseMint),
-      },
-      {
-        isSigner: false,
-        isWritable: false,
-        pubkey: deriveHookConfigAddress(poolState.baseMint),
-      },
-    ])
-    .preInstructions(preInstructions)
-    .postInstructions(postInstructions)
-    .transaction();
-
-  sendTransactionMaybeThrow(svm, transaction, [feeClaimer]);
+  // SPEC-DBC-AUDIT-001 / A-04 (partner system removal): the partner+creator
+  // trading-fee split was replaced by the IPWorld fee model. `claim_trading_fee`
+  // no longer exists on-chain. Tests exercising the legacy partner fee claim
+  // are removed; this stub guards any straggler caller with a clear error.
+  throw new Error(
+    "claimTradingFee removed (A-04 partner system removal). Use the IPWorld " +
+      "claim ops: claimProtocolFee / claimIpOwnerFee / claimAirdropFee."
+  );
 }
 
 export type PartnerWithdrawSurplusParams = {
@@ -372,51 +310,16 @@ export type PartnerWithdrawSurplusParams = {
   virtualPool: PublicKey;
 };
 export async function partnerWithdrawSurplus(
-  svm: LiteSVM,
-  program: VirtualCurveProgram,
-  params: PartnerWithdrawSurplusParams
+  _svm: LiteSVM,
+  _program: VirtualCurveProgram,
+  _params: PartnerWithdrawSurplusParams
 ): Promise<any> {
-  const { feeClaimer, virtualPool } = params;
-  const poolState = getVirtualPool(svm, program, virtualPool);
-  const poolAuthority = derivePoolAuthority();
-
-  const quoteMintInfo = getTokenAccount(svm, poolState.quoteVault)!;
-
-  const preInstructions: TransactionInstruction[] = [];
-  const postInstructions: TransactionInstruction[] = [];
-  const { ata: tokenQuoteAccount, ix: createQuoteTokenAccountIx } =
-    getOrCreateAssociatedTokenAccount(
-      svm,
-      feeClaimer,
-      quoteMintInfo.mint,
-      feeClaimer.publicKey,
-      TOKEN_PROGRAM_ID
-    );
-
-  createQuoteTokenAccountIx && preInstructions.push(createQuoteTokenAccountIx);
-
-  if (quoteMintInfo.mint == NATIVE_MINT) {
-    const unrapSOLIx = unwrapSOLInstruction(feeClaimer.publicKey);
-    unrapSOLIx && postInstructions.push(unrapSOLIx);
-  }
-
-  const transaction = await program.methods
-    .partnerWithdrawSurplus()
-    .accountsPartial({
-      poolAuthority,
-      config: poolState.config,
-      virtualPool,
-      tokenQuoteAccount,
-      quoteVault: poolState.quoteVault,
-      quoteMint: quoteMintInfo.mint,
-      feeClaimer: feeClaimer.publicKey,
-      tokenQuoteProgram: TOKEN_PROGRAM_ID,
-    })
-    .preInstructions(preInstructions)
-    .postInstructions(postInstructions)
-    .transaction();
-
-  sendTransactionMaybeThrow(svm, transaction, [feeClaimer]);
+  // SPEC-DBC-AUDIT-001 / A-04 (partner system removal): partner_withdraw_surplus
+  // no longer exists on-chain. Surplus handling moved to creator_withdraw_surplus.
+  throw new Error(
+    "partnerWithdrawSurplus removed (A-04 partner system removal). Use " +
+      "creatorWithdrawSurplus instead."
+  );
 }
 
 export async function withdrawLeftover(
@@ -503,8 +406,9 @@ export async function partnerWithdrawMigrationFee(
     unrapSOLIx && postInstructions.push(unrapSOLIx);
   }
 
+  // SPEC-DBC-AUDIT-001: withdraw_migration_fee no longer takes a flag arg.
   const transaction = await program.methods
-    .withdrawMigrationFee(0)
+    .withdrawMigrationFee()
     .accountsPartial({
       poolAuthority,
       config: poolState.config,
@@ -523,21 +427,15 @@ export async function partnerWithdrawMigrationFee(
 }
 
 export async function claimPartnerPoolCreationFee(
-  svm: LiteSVM,
-  feeClaimer: Keypair,
-  config: PublicKey,
-  virtualPool: PublicKey,
-  feeReceiver: PublicKey
+  _svm: LiteSVM,
+  _feeClaimer: Keypair,
+  _config: PublicKey,
+  _virtualPool: PublicKey,
+  _feeReceiver: PublicKey
 ) {
-  const program = createVirtualCurveProgram();
-  const transaction = await program.methods
-    .claimPartnerPoolCreationFee()
-    .accountsPartial({
-      config,
-      pool: virtualPool,
-      feeClaimer: feeClaimer.publicKey,
-      feeReceiver,
-    })
-    .transaction();
-  sendTransactionMaybeThrow(svm, transaction, [feeClaimer]);
+  // SPEC-DBC-AUDIT-001 / A-04 (partner system removal): the partner
+  // pool-creation-fee claim path no longer exists on-chain.
+  throw new Error(
+    "claimPartnerPoolCreationFee removed (A-04 partner system removal)."
+  );
 }
