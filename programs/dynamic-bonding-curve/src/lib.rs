@@ -31,17 +31,26 @@ pub mod params;
 declare_id!("dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN");
 
 /// ipworld-hook program ID — used for CPI and account validation.
-/// Uses a constant Pubkey instead of declare_id! to prevent Anchor's
-/// IDL builder from picking it up as DBC's program address.
+///
+/// SPEC-DBC-AUDIT-001 Phase 3 (REQ-E-002, OQ-4): SINGLE SOURCE OF TRUTH.
+/// This re-exports the hook crate's own `declare_id!` constant
+/// (`::ipworld_hook::ID`) rather than holding a duplicated raw-byte copy, so the
+/// core's view of the hook id can NEVER diverge from the hook program's actual
+/// id — a mismatch is impossible by construction, satisfying the build-time
+/// consistency requirement without a separate assertion.
+///
+/// The leading `::` in `::ipworld_hook` forces resolution to the external
+/// `ipworld-hook` crate (extern prelude), not to this same-named local module.
+///
+/// IDL note: the previous implementation used a raw-byte module to keep Anchor's
+/// IDL builder from mis-attributing the hook id as DBC's program address. This
+/// re-export is equivalently safe: there is NO `declare_id!` for the hook in this
+/// crate (only DBC's own `declare_id!("dbcij3...")` at crate root), so the IDL
+/// builder reads DBC's address correctly. The hook's `declare_id!` lives in the
+/// separate hook crate and produces only that crate's IDL. Verified by inspecting
+/// `target/idl/dynamic_bonding_curve.json` after `anchor build`.
 pub mod ipworld_hook {
-    use anchor_lang::prelude::Pubkey;
-    pub static ID: Pubkey = Pubkey::new_from_array([
-        // HooK1111111111111111111111111111111111111111
-        0xf9, 0xb8, 0x12, 0x41, 0x90, 0x51, 0x5b, 0x1f,
-        0x17, 0xc7, 0x4e, 0x27, 0x1a, 0xcf, 0x36, 0xd9,
-        0xf9, 0x8d, 0xb1, 0xb5, 0xd2, 0x78, 0x63, 0x7f,
-        0x28, 0xee, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00,
-    ]);
+    pub use ::ipworld_hook::ID;
 }
 
 #[program]

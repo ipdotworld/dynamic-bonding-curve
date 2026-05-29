@@ -38,6 +38,12 @@ spl-transfer-hook-interface = "0.9"
 spl-tlv-account-resolution = "0.9"
 # SPEC-DBC-004 Phase 6 (REQ-I-003): IP owner fee → vesting vault via CPI.
 ip-owner-vault = { path = "../ip-owner-vault", features = ["cpi"] }
+# SPEC-DBC-AUDIT-001 Phase 3 (REQ-E-002, OQ-4): single source of truth for the
+# ipworld-hook program id. DBC re-exports `ipworld_hook::ID` (the hook's own
+# `declare_id!`) so the two can never diverge. No `cpi` feature: DBC hand-builds
+# the hook `Instruction` (manual discriminator) and only needs the `ID` const.
+# `no-entrypoint` so the hook's entrypoint is not linked into the DBC binary.
+ipworld-hook = { path = "../ipworld-hook", features = ["no-entrypoint"] }
 
 [dev-dependencies]
 proptest = "1.2.0"

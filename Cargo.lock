@@ -855,6 +855,7 @@ dependencies = [
  "damm-v2",
  "dynamic-amm",
  "ip-owner-vault",
+ "ipworld-hook",
  "locker",
  "mpl-token-metadata",
  "num",

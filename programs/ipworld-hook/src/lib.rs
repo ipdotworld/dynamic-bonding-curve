@@ -12,7 +12,14 @@ pub mod errors;
 use state::HookConfig;
 use errors::HookError;
 
-declare_id!("HooK1111111111111111111111111111111111111111");
+// SPEC-DBC-AUDIT-001 Phase 3 (REQ-E-002): real, deployable program id.
+// Generated from `target/deploy/ipworld_hook-keypair.json` (a deploy secret,
+// gitignored). The prior placeholder `HooK1111...` had no matching private key,
+// so Token-2022 pool creation (which sets this as the transfer-hook program and
+// CPIs into it) was undeployable. The core DBC program references this exact id
+// as its single source of truth via `ipworld_hook::ID` (a re-export of THIS
+// `declare_id!` const), so the two can never diverge.
+declare_id!("7WDGrFPSEQjh42aLrzDkqWu6RTCeDYJeTRErKDQDLiC1");
 
 /// On-chain program id of the dynamic-bonding-curve (DBC) program.
 ///
