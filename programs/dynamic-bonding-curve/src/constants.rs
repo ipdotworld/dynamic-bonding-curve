@@ -124,4 +124,8 @@ pub mod seeds {
     pub const OPERATOR_PREFIX: &[u8] = b"operator";
 }
 
-pub const MAX_OPERATION: u8 = 5; // Check OperatorPermission enum variants count (slot 1 = _Reserved1)
+// Upper bound on OperatorPermission bit slots. Slots 0/2/3 are live roles;
+// slots 1 and 4 are reserved discriminant gaps (REQ-D-004). Operator creation
+// no longer uses this bound directly — `validate_single_role_permission` enforces
+// exactly one *valid* role (see state/operator.rs).
+pub const MAX_OPERATION: u8 = 5;

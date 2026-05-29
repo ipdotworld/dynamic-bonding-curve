@@ -1,31 +1,17 @@
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar;
-use crate::state::{IpworldState, TokenVerification, TransferIpOwnerAuth};
-use crate::utils::verify_authority_sig::verify_authority_sig;
+use crate::state::{Operator, TokenVerification};
 use crate::PoolError;
+use anchor_lang::prelude::*;
 
 /// Proposes a transfer of IP owner role to a new wallet (backend-authorized).
 ///
-/// Transaction layout:
-///   ix[N-1]: Ed25519Program.verify(signature, authority, TransferIpOwnerAuth{pool, new_ip_owner})
-///   ix[N]:   DBC.transfer_ip_owner(pool)
-///
-/// The new IP owner must call `accept_ip_owner` to complete the transfer.
-/// Follows the EVM `claimIp` / `acceptRecipient` 2-step pattern (V-03).
+/// SPEC-DBC-AUDIT-001 Phase 4 (REQ-D-002): authorization is now **operator
+/// direct-signing**. The operator signs directly AND must hold the
+/// `OperatorPermission::VerifyToken` role (enforced by `#[access_control(...)]` in
+/// `lib.rs`). The relayed-Ed25519 path is removed; `new_ip_owner` is an instruction
+/// argument. The new IP owner must call `accept_ip_owner` to complete the transfer
+/// (EVM `claimIp` / `acceptRecipient` 2-step pattern).
 #[derive(Accounts)]
 pub struct TransferIpOwnerCtx<'info> {
-    /// Instructions sysvar — used to verify the preceding Ed25519 instruction.
-    /// CHECK: Read-only sysvar; validated inside verify_authority_sig.
-    #[account(address = sysvar::instructions::ID)]
-    pub instruction_sysvar: AccountInfo<'info>,
-
-    /// Platform-wide state holding the backend authority public key.
-    #[account(
-        seeds = [IpworldState::SEED],
-        bump = ipworld_state.bump,
-    )]
-    pub ipworld_state: Account<'info, IpworldState>,
-
     /// Per-pool IP owner verification record.
     #[account(
         mut,
@@ -37,27 +23,26 @@ pub struct TransferIpOwnerCtx<'info> {
     /// The pool this verification record belongs to.
     /// CHECK: Validated indirectly via TokenVerification PDA seeds.
     pub pool: AccountInfo<'info>,
+
+    /// Operator account holding the `VerifyToken` role. Validated by
+    /// `#[access_control(is_valid_operator_role(.., VerifyToken))]` in lib.rs.
+    pub operator: AccountLoader<'info, Operator>,
+
+    /// The operator's whitelisted signer — must sign the transaction directly.
+    pub signer: Signer<'info>,
 }
 
-pub fn handle_transfer_ip_owner(ctx: Context<TransferIpOwnerCtx>) -> Result<()> {
-    let auth: TransferIpOwnerAuth = verify_authority_sig(
-        &ctx.accounts.instruction_sysvar,
-        &ctx.accounts.ipworld_state,
-    )?;
-
-    // Ensure the signed message refers to the same pool as the account passed in.
-    require!(
-        auth.pool == ctx.accounts.pool.key(),
-        PoolError::InvalidAccount
-    );
-
+pub fn handle_transfer_ip_owner(
+    ctx: Context<TransferIpOwnerCtx>,
+    new_ip_owner: Pubkey,
+) -> Result<()> {
     // Reject zero address to prevent accidental lockout.
     require!(
-        auth.new_ip_owner != Pubkey::default(),
+        new_ip_owner != Pubkey::default(),
         PoolError::InvalidOwnerAccount
     );
 
-    ctx.accounts.token_verification.pending_ip_owner = auth.new_ip_owner;
+    ctx.accounts.token_verification.pending_ip_owner = new_ip_owner;
 
     Ok(())
 }

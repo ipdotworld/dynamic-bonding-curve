@@ -14,7 +14,15 @@ no-idl = []
 no-log-ix-name = []
 cpi = ["no-entrypoint"]
 default = []
+# `local`: admin-auth bypass for the test pipeline ONLY (assert_eq_admin -> true).
+# The test build is `anchor build -p dynamic_bonding_curve -- --features local`.
 local = []
+# `production`: SPEC-DBC-AUDIT-001 Phase 4 (REQ-D-002 / SEC-CORE-04). Explicit
+# deploy signal — set ONLY for a real deploy build, NEVER by the test pipeline.
+# Enabling `local` and `production` together is a compile error (see admin/auth.rs),
+# so the test-only admin bypass can never leak into a deployed binary. A safe deploy
+# build is `anchor build -p dynamic_bonding_curve -- --features production` (no local).
+production = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]

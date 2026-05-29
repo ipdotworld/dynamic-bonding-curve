@@ -172,15 +172,19 @@ pub mod dynamic_bonding_curve {
         instructions::handle_accept_ipworld_authority(ctx)
     }
 
-    /// Verifies the IP owner for a pool via Ed25519-signed backend authorization.
-    /// Creates a TokenVerification PDA recording the ip_owner address.
-    pub fn verify_token(ctx: Context<VerifyTokenCtx>) -> Result<()> {
-        instructions::handle_verify_token(ctx)
+    /// Verifies the IP owner for a pool. SPEC-DBC-AUDIT-001 Phase 4 (REQ-D-002):
+    /// operator direct-signing — the signer must hold the `VerifyToken` role.
+    /// Creates a TokenVerification PDA recording the `ip_owner` address.
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::VerifyToken))]
+    pub fn verify_token(ctx: Context<VerifyTokenCtx>, ip_owner: Pubkey) -> Result<()> {
+        instructions::handle_verify_token(ctx, ip_owner)
     }
 
-    /// Proposes a transfer of IP owner role to a new wallet (backend Ed25519 auth). V-03.
-    pub fn transfer_ip_owner(ctx: Context<TransferIpOwnerCtx>) -> Result<()> {
-        instructions::handle_transfer_ip_owner(ctx)
+    /// Proposes a transfer of IP owner role to a new wallet. V-03.
+    /// REQ-D-002: operator direct-signing (`VerifyToken` role).
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::VerifyToken))]
+    pub fn transfer_ip_owner(ctx: Context<TransferIpOwnerCtx>, new_ip_owner: Pubkey) -> Result<()> {
+        instructions::handle_transfer_ip_owner(ctx, new_ip_owner)
     }
 
     /// Accepts a pending IP owner transfer. Must be called by the current ip_owner. V-03.
@@ -188,14 +192,18 @@ pub mod dynamic_bonding_curve {
         instructions::handle_accept_ip_owner(ctx)
     }
 
-    /// Sets the IP treasury address on a TokenVerification PDA (one-time, backend Ed25519 auth). E-01.
-    pub fn set_ip_treasury(ctx: Context<SetIpTreasuryCtx>) -> Result<()> {
-        instructions::handle_set_ip_treasury(ctx)
+    /// Sets the IP treasury address on a TokenVerification PDA (one-time). E-01.
+    /// REQ-D-002: operator direct-signing (`VerifyToken` role).
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::VerifyToken))]
+    pub fn set_ip_treasury(ctx: Context<SetIpTreasuryCtx>, treasury: Pubkey) -> Result<()> {
+        instructions::handle_set_ip_treasury(ctx, treasury)
     }
 
-    /// Proposes a new referral wallet (backend Ed25519 auth). E-02.
-    pub fn set_referral(ctx: Context<SetReferralCtx>) -> Result<()> {
-        instructions::handle_set_referral(ctx)
+    /// Proposes a new referral wallet. E-02.
+    /// REQ-D-002: operator direct-signing (`VerifyToken` role).
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::VerifyToken))]
+    pub fn set_referral(ctx: Context<SetReferralCtx>, new_referral: Pubkey) -> Result<()> {
+        instructions::handle_set_referral(ctx, new_referral)
     }
 
     /// Accepts a pending referral change. Must be called by the current ip_owner. E-02.
@@ -203,9 +211,11 @@ pub mod dynamic_bonding_curve {
         instructions::handle_accept_referral(ctx)
     }
 
-    /// Links a token pool to an IPA identifier (backend Ed25519 auth). E-03.
-    pub fn link_token_to_ip(ctx: Context<LinkTokenToIpCtx>) -> Result<()> {
-        instructions::handle_link_token_to_ip(ctx)
+    /// Links a token pool to an IPA identifier. E-03.
+    /// REQ-D-002: operator direct-signing (`VerifyToken` role).
+    #[access_control(is_valid_operator_role(&ctx.accounts.operator, ctx.accounts.signer.key, OperatorPermission::VerifyToken))]
+    pub fn link_token_to_ip(ctx: Context<LinkTokenToIpCtx>, ipa_id: Pubkey) -> Result<()> {
+        instructions::handle_link_token_to_ip(ctx, ipa_id)
     }
 
     /// PARTNER FUNCTIONS ///
