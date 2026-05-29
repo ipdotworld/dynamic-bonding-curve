@@ -1,6 +1,5 @@
 use std::u64;
 
-use crate::instruction::InitializeVirtualPoolWithSplToken;
 use crate::instruction::InitializeVirtualPoolWithToken2022;
 use crate::instruction::Swap as SwapInstruction;
 use crate::instruction::Swap2 as Swap2Instruction;
@@ -638,9 +637,11 @@ pub fn validate_contain_initialize_pool_ix_and_no_cpi<'c: 'info, 'info>(
         if instruction.program_id == crate::ID {
             let disc = &instruction.data[..8];
 
-            if disc.eq(InitializeVirtualPoolWithSplToken::DISCRIMINATOR)
-                || disc.eq(InitializeVirtualPoolWithToken2022::DISCRIMINATOR)
-            {
+            // SPEC-DBC-AUDIT-001 Phase 6 (REQ-G-001): the SPL pool-init
+            // discriminator branch was dropped with the SPL path. Only
+            // Token-2022 pools can be created, so a same-tx pool-init bundled
+            // with this swap can only be the Token-2022 instruction.
+            if disc.eq(InitializeVirtualPoolWithToken2022::DISCRIMINATOR) {
                 const VIRTUAL_POOL_ACCOUNT_INDEX: usize = 5;
                 let Some(account) = instruction.accounts.get(VIRTUAL_POOL_ACCOUNT_INDEX) else {
                     continue;

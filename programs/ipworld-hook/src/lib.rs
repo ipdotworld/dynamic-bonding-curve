@@ -60,6 +60,76 @@ pub fn derive_base_vault(mint: &Pubkey, pool: &Pubkey) -> Pubkey {
     .0
 }
 
+// SPEC-DBC-AUDIT-001 Phase 6 (REQ-B-001): persistent 5% holding-cap percentage.
+// Denominated in whole percent (5 == 5%). Exactly 5% is ALLOWED; strictly more
+// than 5% is rejected (see `holding_cap_allows`).
+pub const HOLDING_CAP_PERCENT: u128 = 5;
+
+/// Pure holding-cap decision (REQ-B-001). Returns `Ok(())` if the transfer is
+/// permitted by the 5% holding cap, or `Err(HookError::HoldingCapExceeded)` if
+/// the recipient's POST-transfer balance would strictly exceed 5% of total
+/// supply. Exempt recipients always pass.
+///
+/// Factored out of the Execute context so the decision is unit-testable without
+/// constructing Token-2022 accounts.
+///
+/// # Arguments
+/// * `dest_balance`    — the destination token account's CURRENT `amount`
+///   (pre-transfer balance).
+/// * `transfer_amount` — the Execute `amount` (the quantity being transferred).
+/// * `total_supply`    — the mint's `supply`.
+/// * `is_exempt`       — true if the recipient is an exempt wallet (pool vault,
+///   airdrop, treasury). Exempt recipients bypass the cap entirely.
+///
+/// # The exact comparison
+/// Let `post = dest_balance + transfer_amount`. The transfer is REJECTED iff
+///
+/// ```text
+/// post * 100  >  total_supply * HOLDING_CAP_PERCENT      (== total_supply * 5)
+/// ```
+///
+/// i.e. `post / total_supply > 5%`. Using a cross-multiplied integer comparison
+/// (rather than dividing) avoids both floating point and rounding bias:
+/// - `post * 100 == total_supply * 5`  → `post` is EXACTLY 5% → ALLOWED.
+/// - `post * 100  > total_supply * 5`  → `post` is strictly > 5% → REJECTED.
+///
+/// All products are computed in `u128`. Each input is a `u64`, so
+/// `post <= 2 * u64::MAX < u128::MAX`, and `post * 100` / `total_supply * 5`
+/// are both `<= 100 * (2 * u64::MAX)`, far below `u128::MAX` — no overflow for
+/// any real SPL supply. The `checked_*` calls are belt-and-suspenders and map to
+/// `HoldingCapMathOverflow` instead of wrapping.
+///
+/// Edge case: `total_supply == 0` makes the RHS `0`, so any `post > 0` is
+/// rejected and `post == 0` is allowed. A live mint with the hook installed
+/// always has `supply > 0` (the curve is minted at init), so this is only a
+/// defensive boundary.
+pub fn holding_cap_allows(
+    dest_balance: u64,
+    transfer_amount: u64,
+    total_supply: u64,
+    is_exempt: bool,
+) -> std::result::Result<(), HookError> {
+    if is_exempt {
+        return Ok(());
+    }
+
+    let post = (dest_balance as u128)
+        .checked_add(transfer_amount as u128)
+        .ok_or(HookError::HoldingCapMathOverflow)?;
+
+    let lhs = post
+        .checked_mul(100)
+        .ok_or(HookError::HoldingCapMathOverflow)?;
+    let rhs = (total_supply as u128)
+        .checked_mul(HOLDING_CAP_PERCENT)
+        .ok_or(HookError::HoldingCapMathOverflow)?;
+
+    if lhs > rhs {
+        return Err(HookError::HoldingCapExceeded);
+    }
+    Ok(())
+}
+
 
 #[program]
 pub mod ipworld_hook {
@@ -155,16 +225,66 @@ pub mod ipworld_hook {
 
     /// Transfer hook handler — called by Token-2022 on every transfer.
     /// Routed here via fallback() because Token-2022 uses SPL discriminator.
-    pub fn transfer_hook(ctx: Context<TransferHook>, _amount: u64) -> Result<()> {
+    ///
+    /// GRADUATION SCOPING (SPEC-DBC-AUDIT-001 Phase 6 investigation): the DBC
+    /// DAMM-v2 migration (`migrate_damm_v2_initialize_pool`, Step 6) NULLS this
+    /// hook's `program_id` AND its authority on the mint's TransferHook
+    /// extension. After graduation Token-2022 therefore never invokes this hook
+    /// again. So this handler ONLY runs PRE-graduation, which means the P2P
+    /// block (REQ-B-002) and the 5% holding cap (REQ-B-001) apply
+    /// UNCONDITIONALLY whenever the hook runs — no `is_migrated`/graduation flag
+    /// is needed (and none is available: the Execute context only carries
+    /// source/mint/destination/owner + the hook's own PDAs, not the pool state).
+    pub fn transfer_hook(ctx: Context<TransferHook>, amount: u64) -> Result<()> {
         let cfg = &ctx.accounts.hook_config;
         let src = ctx.accounts.source_token.key();
         let dst = ctx.accounts.destination_token.key();
 
-        // Only check: one side must be the curve vault (no P2P transfers)
+        // REQ-B-002 (retained): pre-graduation P2P block. Permit a transfer only
+        // if ONE side is the curve vault; block transfers between two non-vault
+        // wallets. This is unchanged from the prior implementation.
         require!(
             src == cfg.pool_vault || dst == cfg.pool_vault,
             HookError::TransferNotThroughCurve
         );
+
+        // REQ-B-001 (5% holding cap): the decision LOGIC is implemented and
+        // unit-tested as the pure helper `holding_cap_allows(dest_balance,
+        // transfer_amount, total_supply, is_exempt)`. It is intentionally NOT
+        // activated on this live path yet, because doing so soundly requires the
+        // set of EXEMPT recipients, and that set is NOT determinable here:
+        //   - pool vault: known (cfg.pool_vault) and always exempt. ✓
+        //   - airdrop wallet: NOT a fixed/stable address. Base-token airdrop
+        //     fees accumulate in `pool.token_airdrop_base_fee` and are drained
+        //     by an operator (ClaimAirdrop permission) to an OPERATOR-SUPPLIED
+        //     destination chosen per-claim — there is no single airdrop wallet
+        //     to record at hook-config time, and a stored one would be wrong the
+        //     moment the operator drains to a different account.
+        //   - treasury wallet: `ip_treasury` is set AFTER pool creation
+        //     (`set_ip_treasury`) and lives in the per-pool TokenVerification
+        //     account (keyed by pool, not mint) — not visible to this Execute
+        //     context and not known at hook-config time.
+        // Both airdrop and treasury claims move base tokens vault -> recipient
+        // signed by `pool_authority`, which is STRUCTURALLY identical to a BUY
+        // (vault -> buyer, also pool_authority-signed). The hook cannot tell a
+        // protocol distribution from a whale BUY, so it cannot exempt one
+        // without an explicit recipient allow-list — which the airdrop side
+        // makes impossible without an out-of-scope change to the operator/claim
+        // instructions or the hook account model.
+        //
+        // Per SPEC §"If the exempt addresses (airdrop/treasury) are NOT
+        // determinable at hook-config time ... STOP and report rather than
+        // guessing", the live wiring is deferred to a human decision on the
+        // exempt-source mechanism. Activating it now with a single stored
+        // airdrop/treasury wallet would BRICK any legitimate airdrop/treasury
+        // claim whose recipient legitimately exceeds 5% of supply.
+        //
+        // Once the exempt mechanism is decided, activation is one line:
+        //   let dest_balance = ctx.accounts.destination_token.amount;
+        //   let total_supply = ctx.accounts.mint.supply;
+        //   let is_exempt = dst == cfg.pool_vault /* || dst is airdrop/treasury */;
+        //   holding_cap_allows(dest_balance, amount, total_supply, is_exempt)?;
+        let _ = amount; // see note above — `amount` will feed `holding_cap_allows` once wired.
 
         Ok(())
     }
@@ -339,5 +459,104 @@ mod tests {
             derive_base_vault(&mint, &pool_b),
             "base vault must differ per pool even for the same mint"
         );
+    }
+
+    // =====================================================================
+    // SPEC-DBC-AUDIT-001 Phase 6 (REQ-B-001): 5% holding-cap decision helper.
+    // 1B-token supply with 9 decimals is the IPWorld norm; 5% = 50M whole
+    // tokens. Tests use a round 1_000_000 supply (5% = 50_000) for readability,
+    // plus an odd supply to exercise the strict-greater boundary precisely.
+    //
+    // `HookError` (an Anchor #[error_code] enum) does not derive PartialEq, so
+    // these helpers assert the SPECIFIC outcome without comparing error values
+    // directly (and without adding a derive to the production error type).
+    // =====================================================================
+
+    const SUPPLY: u64 = 1_000_000;
+    const FIVE_PCT: u64 = 50_000; // exactly 5% of SUPPLY
+
+    /// True iff the cap REJECTED the transfer with the holding-cap error.
+    fn rejected(r: std::result::Result<(), HookError>) -> bool {
+        matches!(r, Err(HookError::HoldingCapExceeded))
+    }
+    /// True iff the cap ALLOWED the transfer.
+    fn allowed(r: std::result::Result<(), HookError>) -> bool {
+        r.is_ok()
+    }
+
+    /// (a) Strictly more than 5% to a NON-exempt recipient is REJECTED.
+    #[test]
+    fn cap_rejects_above_5pct_for_non_exempt() {
+        // dest starts empty; a single transfer of 50_001 (> 5%) must be rejected.
+        assert!(rejected(holding_cap_allows(0, FIVE_PCT + 1, SUPPLY, false)));
+    }
+
+    /// (a') The crossing into >5% can come from the EXISTING balance plus the
+    /// new amount, not just a single big transfer. 49_999 + 2 = 50_001 (> 5%).
+    #[test]
+    fn cap_rejects_when_post_balance_crosses_5pct() {
+        assert!(rejected(holding_cap_allows(FIVE_PCT - 1, 2, SUPPLY, false)));
+    }
+
+    /// (b) EXACTLY 5% is ALLOWED (the boundary is inclusive).
+    #[test]
+    fn cap_allows_exactly_5pct_boundary() {
+        assert!(allowed(holding_cap_allows(0, FIVE_PCT, SUPPLY, false)));
+        // also reachable as existing + new == exactly 5%
+        assert!(allowed(holding_cap_allows(FIVE_PCT - 10, 10, SUPPLY, false)));
+    }
+
+    /// (b') Just under 5% is allowed; one unit over is the first rejection.
+    #[test]
+    fn cap_boundary_is_strict_greater_than() {
+        assert!(allowed(holding_cap_allows(0, FIVE_PCT - 1, SUPPLY, false)));
+        assert!(allowed(holding_cap_allows(0, FIVE_PCT, SUPPLY, false)));
+        assert!(rejected(holding_cap_allows(0, FIVE_PCT + 1, SUPPLY, false)));
+    }
+
+    /// (b'') Odd supply not divisible by 20: the cross-multiplied comparison
+    /// must still treat exactly-5% as allowed and the next unit as rejected,
+    /// with no rounding drift. supply=1_000_003 → 5% = 50_000.15, so the largest
+    /// integer post-balance that is <= 5% is 50_000 (50_000*100=5_000_000 <=
+    /// 1_000_003*5=5_000_015), and 50_001 (*100=5_000_100 > 5_000_015) rejects.
+    #[test]
+    fn cap_odd_supply_no_rounding_bias() {
+        let odd_supply: u64 = 1_000_003;
+        assert!(allowed(holding_cap_allows(0, 50_000, odd_supply, false)));
+        assert!(rejected(holding_cap_allows(0, 50_001, odd_supply, false)));
+    }
+
+    /// (c) Each EXEMPT recipient bypasses the cap even FAR above 5% — including
+    /// taking essentially the entire supply (the pool vault holds ~all supply
+    /// pre-graduation, so this must always pass). `is_exempt` stands in for the
+    /// pool vault / airdrop / treasury recipients.
+    #[test]
+    fn cap_exempt_recipient_always_allowed() {
+        // 100% of supply to an exempt recipient: allowed.
+        assert!(allowed(holding_cap_allows(0, SUPPLY, SUPPLY, true)));
+        // exempt already holding most of supply, receiving more: allowed.
+        assert!(allowed(holding_cap_allows(SUPPLY - 1, SUPPLY, SUPPLY, true)));
+        // the SAME numbers that reject a non-exempt recipient pass when exempt.
+        assert!(rejected(holding_cap_allows(0, FIVE_PCT + 1, SUPPLY, false)));
+        assert!(allowed(holding_cap_allows(0, FIVE_PCT + 1, SUPPLY, true)));
+    }
+
+    /// Overflow safety: even the largest possible u64 inputs do not panic; the
+    /// u128 intermediates absorb `2 * u64::MAX * 100` comfortably. A non-exempt
+    /// recipient taking u64::MAX against a tiny supply is (correctly) rejected,
+    /// and the same against an exempt recipient is allowed — neither overflows.
+    #[test]
+    fn cap_no_overflow_on_u64_extremes() {
+        assert!(rejected(holding_cap_allows(u64::MAX, u64::MAX, 1, false)));
+        assert!(allowed(holding_cap_allows(u64::MAX, u64::MAX, u64::MAX, true)));
+    }
+
+    /// Defensive boundary: zero supply rejects any positive post-balance for a
+    /// non-exempt recipient (RHS is 0), and allows a zero-amount transfer. A live
+    /// hooked mint always has supply > 0, so this only guards the math.
+    #[test]
+    fn cap_zero_supply_edge() {
+        assert!(rejected(holding_cap_allows(0, 1, 0, false)));
+        assert!(allowed(holding_cap_allows(0, 0, 0, false)));
     }
 }

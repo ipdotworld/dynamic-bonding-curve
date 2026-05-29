@@ -238,13 +238,11 @@ pub mod dynamic_bonding_curve {
     // partner_withdraw_surplus removed in A-04 (partner system removal)
 
     /// POOL CREATOR FUNCTIONS ////
-    pub fn initialize_virtual_pool_with_spl_token<'c: 'info, 'info>(
-        ctx: Context<'_, '_, 'c, 'info, InitializeVirtualPoolWithSplTokenCtx<'info>>,
-        params: InitializePoolParameters,
-    ) -> Result<()> {
-        instructions::handle_initialize_virtual_pool_with_spl_token(ctx, params)
-    }
-
+    // SPEC-DBC-AUDIT-001 Phase 6 (REQ-G-001): the plain-SPL pool-creation
+    // entrypoint (`initialize_virtual_pool_with_spl_token`) was removed. Plain
+    // SPL mints cannot carry the Token-2022 transfer hook that enforces the
+    // IPWorld holding cap / P2P block, so IPWorld is Token-2022 ONLY. The
+    // Token-2022 path below is the sole pool-creation entrypoint.
     pub fn initialize_virtual_pool_with_token2022<'c: 'info, 'info>(
         ctx: Context<'_, '_, 'c, 'info, InitializeVirtualPoolWithToken2022Ctx<'info>>,
         params: InitializePoolParameters,
