@@ -36,6 +36,7 @@ import {
   createMeteoraDammV2Metadata,
   MigrateMeteoraDammV2Params,
   migrateToDammV2,
+  progressCurveToGraduation,
 } from "../instructions";
 import {
   clusterApiUrl,
@@ -746,19 +747,10 @@ export async function createPoolAndSwapForMigration(
       uri: "abc.com",
     },
   });
-  const virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
-  await swap(svm, program, {
-    config,
-    payer: poolCreator,
-    pool: virtualPool,
-    inputTokenMint: NATIVE_MINT,
-    outputTokenMint: virtualPoolState.baseMint,
-    amountIn: new BN(LAMPORTS_PER_SOL * 5.5),
-    minimumAmountOut: new BN(0),
-    swapMode: SwapMode.PartialFill,
-    referralTokenAccount: null,
-  });
+  // SPEC-DBC-AUDIT-001: graduate via many sub-5% buyers instead of a single
+  // `5.5 SOL` buy that would trip the holding cap (HoldingCapExceeded).
+  await progressCurveToGraduation(svm, program, config, virtualPool);
 
   return virtualPool;
 }

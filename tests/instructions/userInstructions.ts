@@ -42,7 +42,8 @@ import {
   getVirtualPoolMetadata,
 } from "../utils/fetcher";
 import { VirtualCurveProgram } from "../utils/types";
-import { getSvmAuthority } from "../utils/svm";
+import { getSvmAuthority, generateAndFund } from "../utils/svm";
+import { mintSplTokenTo } from "../utils/token";
 import { buildEd25519Ix, serializeLaunchAuth, serializeTradeAuth } from "../utils/ed25519";
 
 export type InitializePoolParameters = {
@@ -955,6 +956,174 @@ export async function swapSimulate(
     completed:
       Number(poolState.quoteReserve) >= Number(configs.migrationQuoteThreshold),
   };
+}
+
+// ---------------------------------------------------------------------------
+// SPEC-DBC-AUDIT-001 cap-aware graduation helper.
+//
+// Why this exists: the IPWorld transfer hook (Phase 3) enforces a 5%-of-supply
+// holding cap on every pre-graduation recipient (HoldingCapExceeded = 0x1773).
+// Legacy tests graduated a curve with ONE buy of `migrationQuoteThreshold`,
+// which hands a single buyer ~100% of the circulating base and trips the cap.
+//
+// `progressCurveToGraduation` spreads the total quote across MANY distinct buyer
+// wallets, each kept under 5%, mirroring the proven multi-buyer pattern in
+// graduation_hook_removal.tests.ts. The curve ends in the SAME state a single
+// PartialFill of `threshold` would have produced (quoteReserve == threshold,
+// pool complete), so downstream migration / fee / LP-claim assertions are
+// unaffected — only HOW the curve is progressed changes.
+//
+// Two constraints shape the algorithm:
+//   1. The 5% holding cap binds hardest on the FIRST (cheapest) buyer — early
+//      buys must be small. As the curve price rises, a fixed SOL amount buys
+//      proportionally LESS base, so later buys can be much larger and still stay
+//      under 5%. The helper therefore RAMPS the per-buyer amount up geometrically.
+//   2. LiteSVM has an empirically-confirmed ~98 distinct-fee-payer ceiling: past
+//      ~98 distinct signing accounts, `sendTransaction` fails with EMPTY logs.
+//      The geometric ramp graduates even a 300-SOL threshold in ~25 buyers,
+//      keeping the distinct-buyer count well under that ceiling. (A flat tiny
+//      per-buyer would need ~200 buyers and hit the wall mid-curve.)
+//
+// Quote funding:
+//   - NATIVE_MINT pool  -> each buyer is funded with SOL (generateAndFund) and
+//     the `swap` builder wraps it automatically. No `quoteMintAuthority` needed.
+//   - custom SPL quote  -> caller MUST pass `quoteMintAuthority` (the keypair
+//     that minted the quote, e.g. `admin` in designCurve tests); the helper
+//     mints each buyer's quote.
+// ---------------------------------------------------------------------------
+export type ProgressCurveOptions = {
+  // Mint authority for a custom (non-NATIVE_MINT) quote token. Required only
+  // when the pool's quote mint is not NATIVE_MINT.
+  quoteMintAuthority?: Keypair;
+  // Starting per-buyer quote. Defaults to migrationQuoteThreshold / `startDivisor`.
+  startPerBuyerAmount?: BN;
+  // Controls the (small, cap-safe) FIRST buy size: threshold / startDivisor.
+  // 150 lands the first buy comfortably under 5% on both the standard and the
+  // front-loaded designCurve families; the loop also auto-shrinks on a cap hit.
+  startDivisor?: number;
+  // Geometric growth applied to the per-buyer amount after each successful buy
+  // (numerator/denominator). 7/5 = 1.4x — fast enough to graduate large
+  // thresholds in ~25 buys, gentle enough to stay under the cap as price rises.
+  growthNum?: number;
+  growthDen?: number;
+  // Safety ceiling on buyer count. Kept below the ~98 LiteSVM fee-payer limit.
+  maxBuyers?: number;
+};
+
+export async function progressCurveToGraduation(
+  svm: LiteSVM,
+  program: VirtualCurveProgram,
+  config: PublicKey,
+  pool: PublicKey,
+  options: ProgressCurveOptions = {}
+): Promise<{ buyersUsed: number; completed: boolean }> {
+  const poolState = getVirtualPool(svm, program, pool);
+  const configState = getConfig(svm, program, config);
+
+  const baseMint = poolState.baseMint;
+  const quoteMint = configState.quoteMint;
+  const isNativeQuote = quoteMint.equals(NATIVE_MINT);
+
+  if (!isNativeQuote && !options.quoteMintAuthority) {
+    throw new Error(
+      "progressCurveToGraduation: custom quote mint requires `quoteMintAuthority` " +
+        "(the keypair that can mint the quote token to each buyer)."
+    );
+  }
+
+  const threshold: BN = configState.migrationQuoteThreshold;
+  const startDivisor = options.startDivisor ?? 150;
+  // Growth 2x graduates a 300-SOL threshold in ~13 buyers. Several tests share
+  // ONE LiteSVM instance across multiple graduations (e.g. creator_claim_trading_fee
+  // runs 4 in a `before`), so keeping each graduation lean keeps the cumulative
+  // distinct-buyer count under the ~98 LiteSVM fee-payer ceiling. The cap-shrink
+  // path below still protects the (cap-binding) first buy.
+  const growthNum = new BN(options.growthNum ?? 2);
+  const growthDen = new BN(options.growthDen ?? 1);
+  const maxBuyers = options.maxBuyers ?? 90; // under the ~98 LiteSVM limit
+
+  let perBuyer: BN =
+    options.startPerBuyerAmount ?? threshold.div(new BN(startDivisor)).addn(1);
+
+  // Floor for the cap-shrink path: never shrink below threshold/4000. Hitting it
+  // means even a near-minimal buy exceeds 5% — a real cap-vs-curve problem.
+  const minPerBuyer = threshold.div(new BN(4000)).addn(1);
+
+  let buyersUsed = 0;
+  let completed = false;
+
+  for (let attempt = 0; attempt < maxBuyers; attempt++) {
+    const buyer = generateAndFund(svm);
+
+    if (!isNativeQuote) {
+      mintSplTokenTo(
+        svm,
+        buyer,
+        quoteMint,
+        options.quoteMintAuthority!,
+        buyer.publicKey,
+        BigInt(perBuyer.toString())
+      );
+    }
+
+    try {
+      const res = await swap(svm, program, {
+        config,
+        payer: buyer,
+        pool,
+        inputTokenMint: quoteMint,
+        outputTokenMint: baseMint,
+        amountIn: perBuyer,
+        minimumAmountOut: new BN(0),
+        // PartialFill: the buy that crosses the threshold only takes what's
+        // needed to reach it, so the final buyer never overshoots (the resulting
+        // quoteReserve == threshold matches the legacy single-buy end state).
+        swapMode: SwapMode.PartialFill,
+        referralTokenAccount: null,
+      });
+      buyersUsed++;
+
+      if (res.completed) {
+        completed = true;
+        break;
+      }
+      // Ramp up: price has risen, so a larger next buy still stays under the cap.
+      perBuyer = perBuyer.mul(growthNum).div(growthDen).addn(1);
+    } catch (e: unknown) {
+      const msg = String(e instanceof Error ? e.message : e);
+      // HoldingCapExceeded (0x1773 / 6003): this buyer's slice exceeds 5% of
+      // supply at the current price. Halve and retry with a fresh buyer; the
+      // reverted tx left curve state unchanged so no progress is lost.
+      const isHoldingCap =
+        msg.includes("HoldingCapExceeded") ||
+        msg.includes("0x1773") ||
+        msg.includes("6003");
+      if (!isHoldingCap) {
+        throw e;
+      }
+      const halved = perBuyer.div(new BN(2));
+      if (halved.lte(minPerBuyer)) {
+        throw new Error(
+          `progressCurveToGraduation: even a near-minimal buy (${perBuyer.toString()}) ` +
+            `trips the 5% holding cap — the curve may be too front-loaded for the cap. ` +
+            `Original error: ${msg}`
+        );
+      }
+      perBuyer = halved;
+    }
+  }
+
+  if (!completed) {
+    throw new Error(
+      `progressCurveToGraduation: curve did not reach migration threshold after ` +
+        `${buyersUsed} successful buys (final perBuyer=${perBuyer.toString()}, ` +
+        `threshold=${threshold.toString()}). The geometric ramp should graduate ` +
+        `within ~${maxBuyers} buyers; if not, the curve/threshold combination may ` +
+        `need a tuned startDivisor/growth.`
+    );
+  }
+
+  return { buyersUsed, completed };
 }
 
 export async function createVirtualPoolMetadata(

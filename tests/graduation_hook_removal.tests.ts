@@ -75,6 +75,9 @@ describe("Step 6 — Graduation: hook removal + DAMM v2 migration", () => {
   let virtualPool: PublicKey;
   let virtualPoolState: Pool;
   let dammConfig: PublicKey;
+  // A buyer captured during the fill step, used post-graduation to prove the
+  // (now-nulled) hook no longer enforces the P2P block / 5% cap.
+  let capturedBuyer: Keypair;
 
   before(async () => {
     svm = startSvm();
@@ -241,6 +244,9 @@ describe("Step 6 — Graduation: hook removal + DAMM v2 migration", () => {
           referralTokenAccount: null,
         };
         await swap(svm, program, params);
+        // Capture the FIRST successful buyer; it holds a sub-5% base balance we
+        // will move P2P after graduation (when the hook is gone).
+        if (!capturedBuyer) capturedBuyer = buyer;
       } catch (e: any) {
         // PoolIsCompleted means curve is full — graduation ready
         if (e.message?.includes("PoolIsCompleted")) break;
@@ -332,5 +338,70 @@ describe("Step 6 — Graduation: hook removal + DAMM v2 migration", () => {
     const hookAuthority = new PublicKey(hookData!.subarray(0, 32));
     expect(hookAuthority.equals(PublicKey.default)).to.be.true;
     console.log("    ✅ TransferHook authority is zeroed — no one can re-enable");
+  });
+
+  it("✅ post-graduation: a P2P transfer with NO hook accounts succeeds (cap + P2P block are gone)", async () => {
+    // Pre-graduation, the transfer hook (a) BLOCKS wallet→wallet transfers where
+    // neither side is the pool vault (TransferNotThroughCurve) and (b) caps any
+    // recipient at 5% of supply. After migration nulled the mint's TransferHook,
+    // Token-2022 invokes NO hook at all — so a plain transferChecked between two
+    // non-vault wallets, WITHOUT appending any hook accounts, must now succeed.
+    const {
+      getAssociatedTokenAddressSync,
+      createAssociatedTokenAccountInstruction,
+      createTransferCheckedInstruction,
+      TOKEN_2022_PROGRAM_ID,
+    } = await import("@solana/spl-token");
+    const { sendTransactionMaybeThrow, getTokenAccount } = await import("./utils/common");
+    const { Transaction } = await import("@solana/web3.js");
+
+    expect(capturedBuyer, "a buyer should have been captured during the fill").to
+      .not.be.undefined;
+
+    const srcAta = getAssociatedTokenAddressSync(
+      virtualPoolState.baseMint,
+      capturedBuyer.publicKey,
+      true,
+      TOKEN_2022_PROGRAM_ID
+    );
+    const srcBalance = getTokenAccount(svm, srcAta)!.amount;
+    expect(srcBalance > 0n).to.equal(true);
+
+    // Fresh P2P recipient (NOT the pool vault) — exactly the case the hook blocked.
+    const recipient = generateAndFund(svm);
+    const dstAta = getAssociatedTokenAddressSync(
+      virtualPoolState.baseMint,
+      recipient.publicKey,
+      true,
+      TOKEN_2022_PROGRAM_ID
+    );
+
+    const tx = new Transaction().add(
+      createAssociatedTokenAccountInstruction(
+        capturedBuyer.publicKey,
+        dstAta,
+        recipient.publicKey,
+        virtualPoolState.baseMint,
+        TOKEN_2022_PROGRAM_ID
+      ),
+      // Plain transferChecked: NO [extraMeta, hookConfig, hookProgram] appended.
+      createTransferCheckedInstruction(
+        srcAta,
+        virtualPoolState.baseMint,
+        dstAta,
+        capturedBuyer.publicKey,
+        srcBalance,
+        6,
+        [],
+        TOKEN_2022_PROGRAM_ID
+      )
+    );
+    // If the hook were still live this would revert (TransferNotThroughCurve);
+    // post-graduation it goes through.
+    sendTransactionMaybeThrow(svm, tx, [capturedBuyer]);
+
+    const dstBalance = getTokenAccount(svm, dstAta)!.amount;
+    expect(dstBalance.toString()).to.equal(srcBalance.toString());
+    console.log("    ✅ P2P transfer succeeded post-graduation — hook fully disabled");
   });
 });

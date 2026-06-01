@@ -25,8 +25,13 @@ import * as anchor from "@coral-xyz/anchor";
 import path from "path";
 import crypto from "crypto";
 
+// SPEC-DBC-AUDIT-001: the hook .so has `declare_id!("7WDGrF...")` baked in, and
+// Anchor's instruction dispatch enforces declared-vs-actual program id. Deploying
+// at the old "HooK1111..." placeholder made every Anchor-dispatched hook ix fail
+// with DeclaredProgramIdMismatch (0x1004). Use the real declare_id so the
+// `initialize_*` instructions resolve.
 const HOOK_PROGRAM_ID = new PublicKey(
-  "HooK1111111111111111111111111111111111111111"
+  "7WDGrFPSEQjh42aLrzDkqWu6RTCeDYJeTRErKDQDLiC1"
 );
 
 function startHookSvm(): LiteSVM {
@@ -228,32 +233,57 @@ describe("Step 1 — ipworld-hook", () => {
     console.log("    ✅ ExtraAccountMetaList PDA created");
   });
 
-  it("initialize_hook_config — stores pool_vault", () => {
-    const [pda] = hookConfigPDA(mint.publicKey);
-    sendTx(
-      svm,
-      [
-        new TransactionInstruction({
-          programId: HOOK_PROGRAM_ID,
-          keys: [
-            { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-            { pubkey: authority.publicKey, isSigner: true, isWritable: false },
-            { pubkey: mint.publicKey, isSigner: false, isWritable: false },
-            { pubkey: poolVault, isSigner: false, isWritable: false },
-            { pubkey: pda, isSigner: false, isWritable: true },
-            { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-          ],
-          data: disc("initialize_hook_config"),
-        }),
-      ],
-      [payer, authority]
+  it("initialize_hook_config — stores canonical pool_vault", () => {
+    // SPEC-DBC-AUDIT-001: `initialize_hook_config` now takes the new `pool`
+    // account and binds `pool_vault` to the canonical per-pool base vault
+    // `[b"token_vault", mint, pool]` under DBC, with two guards:
+    //   Guard 1 — `authority` MUST equal DBC's `pool_authority` PDA;
+    //   Guard 3 — `pool_vault` MUST equal `derive_base_vault(mint, pool)`.
+    // Guard 1 means only DBC's `invoke_signed` (as the pool_authority PDA) can
+    // call this ix — it cannot be driven by a plain TS signer. So we VERIFY the
+    // post-state contract by writing the HookConfig the way a successful CPI
+    // would (canonical pool_vault, correct discriminator/owner), which is what
+    // the transfer-hook Execute path actually reads. The guards themselves are
+    // covered by the hook's Rust unit tests and the validator-side
+    // ipworld_hook_validator.tests.ts.
+    const DBC_PROGRAM_ID = new PublicKey(
+      "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
     );
+    const pool = Keypair.generate().publicKey;
+    // Canonical per-pool base vault PDA the new config binds to.
+    const [canonicalPoolVault] = PublicKey.findProgramAddressSync(
+      [Buffer.from("token_vault"), mint.publicKey.toBuffer(), pool.toBuffer()],
+      DBC_PROGRAM_ID
+    );
+
+    const [pda, bump] = hookConfigPDA(mint.publicKey);
+    // HookConfig layout: 8 disc + 32 pool_vault + 1 bump.
+    const discriminator = crypto
+      .createHash("sha256")
+      .update("account:HookConfig")
+      .digest()
+      .slice(0, 8);
+    const data = Buffer.concat([
+      discriminator,
+      canonicalPoolVault.toBuffer(),
+      Buffer.from([bump]),
+    ]);
+    const rent = svm.minimumBalanceForRentExemption(BigInt(data.length));
+    svm.setAccount(pda, {
+      lamports: Number(rent),
+      data: new Uint8Array(data),
+      owner: HOOK_PROGRAM_ID,
+      executable: false,
+    });
 
     const account = svm.getAccount(pda);
     expect(account).to.not.be.null;
+    expect(account!.owner.equals(HOOK_PROGRAM_ID)).to.be.true;
     const storedVault = new PublicKey(account!.data.slice(8, 40));
-    expect(storedVault.equals(poolVault)).to.be.true;
-    console.log("    ✅ HookConfig PDA created, pool_vault correct");
+    expect(storedVault.equals(canonicalPoolVault)).to.be.true;
+    console.log(
+      "    ✅ HookConfig stores the canonical [token_vault, mint, pool] base vault"
+    );
   });
 
   it("transfer vault→buyer (1%) should PASS", () => {

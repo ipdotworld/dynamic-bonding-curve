@@ -9,6 +9,7 @@ import {
   createConfig,
   CreateConfigParams,
   createPoolWithSplToken,
+  progressCurveToGraduation,
   swap,
   SwapMode,
   SwapParams,
@@ -172,18 +173,9 @@ describe("Claim lp on meteora dammm", () => {
   });
 
   it("Swap", async () => {
-    const params: SwapParams = {
-      config,
-      payer: user,
-      pool: virtualPool,
-      inputTokenMint: NATIVE_MINT,
-      outputTokenMint: virtualPoolState.baseMint,
-      amountIn: new BN(LAMPORTS_PER_SOL * 5.5),
-      minimumAmountOut: new BN(0),
-      swapMode: SwapMode.PartialFill,
-      referralTokenAccount: null,
-    };
-    await swap(svm, program, params);
+    // SPEC-DBC-AUDIT-001: graduate via many sub-5% buyers instead of a single
+    // `5.5 SOL` buy that would trip the 5% holding cap.
+    await progressCurveToGraduation(svm, program, config, virtualPool);
   });
 
   it("Create meteora damm v2 metadata", async () => {

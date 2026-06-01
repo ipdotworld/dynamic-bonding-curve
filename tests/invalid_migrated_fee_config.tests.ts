@@ -48,13 +48,15 @@ import { deriveTokenVerificationAddress } from "./utils/accounts";
 import { VirtualCurveProgram } from "./utils/types";
 
 // PoolError discriminants (Anchor: 6000 + variant index).
-// See `programs/dynamic-bonding-curve/src/error.rs`.
-//   index 73: IpTreasuryAlreadySet  → code 6073 = 0x17b9
-//   index 77: IpTreasuryNotSet      → code 6077 = 0x17bd
-//   index 78: InvalidMigratedFeeConfig → code 6078 = 0x17be
-const ERR_INVALID_MIGRATED_FEE_CONFIG = "0x17be";
-const ERR_IP_TREASURY_NOT_SET = "0x17bd";
-const ERR_IP_TREASURY_ALREADY_SET = "0x17b9";
+// See `programs/dynamic-bonding-curve/src/error.rs`. SPEC-DBC-AUDIT-001
+// reordered the IPWorld error variants, so the codes shifted from the
+// SPEC-DBC-004-era values. Re-derived from the current enum order:
+//   index 62: IpTreasuryAlreadySet     → code 6062 = 0x17ae
+//   index 65: IpTreasuryNotSet         → code 6065 = 0x17b1
+//   index 66: InvalidMigratedFeeConfig → code 6066 = 0x17b2
+const ERR_INVALID_MIGRATED_FEE_CONFIG = "0x17b2";
+const ERR_IP_TREASURY_NOT_SET = "0x17b1";
+const ERR_IP_TREASURY_ALREADY_SET = "0x17ae";
 
 // `MigrationFeeOption::Customizable == 6` per state/config.rs:464.
 // Only the Customizable path runs `MigratedPoolFeeValidator::validate()`,
@@ -261,11 +263,13 @@ describe("SPEC-DBC-004 Phase 4 — REQ-I-002 + REQ-I-005", () => {
     // path (error code 0x17b9) is taken.
   });
 
-  it("REQ-I-005: error codes are stable (IpTreasuryNotSet=0x17bd, IpTreasuryAlreadySet=0x17b9)", () => {
+  it("REQ-I-005: error codes are stable (IpTreasuryNotSet=0x17b1, IpTreasuryAlreadySet=0x17ae)", () => {
     // These constants are captured here so any future renumbering of
     // PoolError variants will fail this test and surface the breaking
     // change before the integration tests notice via opaque hex strings.
-    expect(ERR_IP_TREASURY_NOT_SET).to.equal("0x17bd");
-    expect(ERR_IP_TREASURY_ALREADY_SET).to.equal("0x17b9");
+    // SPEC-DBC-AUDIT-001 reordered the IPWorld error variants: IpTreasuryNotSet
+    // 0x17bd -> 0x17b1 (6065), IpTreasuryAlreadySet 0x17b9 -> 0x17ae (6062).
+    expect(ERR_IP_TREASURY_NOT_SET).to.equal("0x17b1");
+    expect(ERR_IP_TREASURY_ALREADY_SET).to.equal("0x17ae");
   });
 });

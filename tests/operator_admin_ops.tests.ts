@@ -469,6 +469,201 @@ describe("SPEC-DBC-AUDIT-001 — operator-direct admin ops (REQ-D-002, SEC-CORE-
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SPEC-DBC-AUDIT-001 gap coverage (pass T3): two-step accept_ip_owner +
+// set_ip_treasury one-time immutability. These restore (and correct) the two-step
+// surface previously in the now-deleted quarantined ip_owner_verify.tests.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("SPEC-DBC-AUDIT-001 — accept_ip_owner two-step + set_ip_treasury immutability", () => {
+  let svm: LiteSVM;
+  let program: VirtualCurveProgram;
+  let admin: Keypair;
+  let partner: Keypair;
+  let poolCreator: Keypair;
+  let verifyOperator: Keypair;
+
+  before(async () => {
+    svm = startSvm();
+    program = createVirtualCurveProgram();
+    admin = generateAndFund(svm);
+    partner = generateAndFund(svm);
+    poolCreator = generateAndFund(svm);
+    verifyOperator = generateAndFund(svm);
+    await createOperatorAccount(svm, program, {
+      admin,
+      whitelistedAddress: verifyOperator.publicKey,
+      permissions: [OperatorPermission.VerifyToken],
+    });
+  });
+
+  // Sets up a pool whose TokenVerification.ip_owner is a keypair WE control (so we
+  // can sign accept_ip_owner as the current owner). Returns pool, TV, owner keypair.
+  async function verifiedPoolWithOwner(): Promise<{
+    pool: PublicKey;
+    tvAddr: PublicKey;
+    ipOwner: Keypair;
+  }> {
+    const config = await createConfig(svm, program, {
+      payer: partner,
+      feeClaimer: partner.publicKey,
+      quoteMint: NATIVE_MINT,
+      instructionParams: token2022Config(),
+    });
+    const pool = await createPoolWithToken2022(svm, program, {
+      poolCreator,
+      payer: poolCreator,
+      quoteMint: NATIVE_MINT,
+      config,
+      instructionParams: { name: "Op Test", symbol: "OPT", uri: "x" },
+    });
+    const tvAddr = deriveTokenVerificationAddress(pool);
+    const ipOwner = generateAndFund(svm);
+    const tx = await program.methods
+      .verifyToken(ipOwner.publicKey)
+      .accountsPartial({
+        payer: verifyOperator.publicKey,
+        tokenVerification: tvAddr,
+        pool,
+        operator: deriveOperatorAddress(verifyOperator.publicKey),
+        signer: verifyOperator.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .transaction();
+    sendTransactionMaybeThrow(svm, tx, [verifyOperator]);
+    return { pool, tvAddr, ipOwner };
+  }
+
+  it("accept_ip_owner: the CURRENT ip_owner finalizes a pending transfer (pending promoted, cleared)", async () => {
+    const { pool, tvAddr, ipOwner } = await verifiedPoolWithOwner();
+    const newOwner = Keypair.generate().publicKey;
+
+    // Operator proposes the transfer (sets pending_ip_owner).
+    const proposeTx = await program.methods
+      .transferIpOwner(newOwner)
+      .accountsPartial({
+        tokenVerification: tvAddr,
+        pool,
+        operator: deriveOperatorAddress(verifyOperator.publicKey),
+        signer: verifyOperator.publicKey,
+      })
+      .transaction();
+    sendTransactionMaybeThrow(svm, proposeTx, [verifyOperator]);
+    expect(
+      getTokenVerification(svm, program, tvAddr).pendingIpOwner.toBase58()
+    ).to.equal(newOwner.toBase58());
+
+    // NOTE on the two-step shape: the program's `accept_ip_owner` is signed by the
+    // CURRENT `ip_owner` (constraint `ip_owner.key() == token_verification.ip_owner`),
+    // which then PROMOTES `pending_ip_owner`. (This differs from a "pending recipient
+    // accepts" pattern — the on-chain guard is the current owner's signature.)
+    const acceptTx = await program.methods
+      .acceptIpOwner()
+      .accountsPartial({
+        ipOwner: ipOwner.publicKey,
+        tokenVerification: tvAddr,
+        pool,
+      })
+      .transaction();
+    sendTransactionMaybeThrow(svm, acceptTx, [ipOwner]);
+
+    const tv = getTokenVerification(svm, program, tvAddr);
+    expect(tv.ipOwner.toBase58()).to.equal(newOwner.toBase58());
+    expect(tv.pendingIpOwner.toBase58()).to.equal(PublicKey.default.toBase58());
+  });
+
+  it("accept_ip_owner: a signer that is NOT the current ip_owner is REJECTED (Unauthorized)", async () => {
+    const { pool, tvAddr, ipOwner } = await verifiedPoolWithOwner();
+
+    // Propose a transfer so there's a pending owner to (illegitimately) accept.
+    const proposeTx = await program.methods
+      .transferIpOwner(Keypair.generate().publicKey)
+      .accountsPartial({
+        tokenVerification: tvAddr,
+        pool,
+        operator: deriveOperatorAddress(verifyOperator.publicKey),
+        signer: verifyOperator.publicKey,
+      })
+      .transaction();
+    sendTransactionMaybeThrow(svm, proposeTx, [verifyOperator]);
+
+    // A stranger (not the current ip_owner) tries to finalize → ConstraintRaw /
+    // Unauthorized (the `ip_owner.key() == token_verification.ip_owner` constraint).
+    const stranger = generateAndFund(svm);
+    let threw = false;
+    try {
+      const badTx = await program.methods
+        .acceptIpOwner()
+        .accountsPartial({
+          ipOwner: stranger.publicKey,
+          tokenVerification: tvAddr,
+          pool,
+        })
+        .transaction();
+      sendTransactionMaybeThrow(svm, badTx, [stranger]);
+    } catch (e: any) {
+      threw = true;
+      const m = String(e.message);
+      expect(
+        m.includes("Unauthorized") || m.includes("ConstraintRaw") || m.includes("2003"),
+        "expected an Unauthorized/ConstraintRaw rejection, got:\n" + m.slice(-400)
+      ).to.equal(true);
+    }
+    expect(threw, "wrong-signer accept_ip_owner must revert").to.equal(true);
+    // ip_owner unchanged (the illegitimate accept did not take effect).
+    expect(
+      getTokenVerification(svm, program, tvAddr).ipOwner.toBase58()
+    ).to.equal(ipOwner.publicKey.toBase58());
+  });
+
+  it("set_ip_treasury: first set SUCCEEDS; a SECOND set is REJECTED (IpTreasuryAlreadySet)", async () => {
+    const { pool, tvAddr } = await verifiedPoolWithOwner();
+    const treasury1 = Keypair.generate().publicKey;
+
+    // First set: ip_treasury is still default → require!() passes.
+    const okTx = await program.methods
+      .setIpTreasury(treasury1)
+      .accountsPartial({
+        tokenVerification: tvAddr,
+        pool,
+        operator: deriveOperatorAddress(verifyOperator.publicKey),
+        signer: verifyOperator.publicKey,
+      })
+      .transaction();
+    sendTransactionMaybeThrow(svm, okTx, [verifyOperator]);
+    expect(
+      getTokenVerification(svm, program, tvAddr).ipTreasury.toBase58()
+    ).to.equal(treasury1.toBase58());
+
+    // Second set: ip_treasury is now non-default → require!() fires
+    // IpTreasuryAlreadySet (0x17ae). One-time immutability (REQ-I-005).
+    let threw = false;
+    try {
+      const badTx = await program.methods
+        .setIpTreasury(Keypair.generate().publicKey)
+        .accountsPartial({
+          tokenVerification: tvAddr,
+          pool,
+          operator: deriveOperatorAddress(verifyOperator.publicKey),
+          signer: verifyOperator.publicKey,
+        })
+        .transaction();
+      sendTransactionMaybeThrow(svm, badTx, [verifyOperator]);
+    } catch (e: any) {
+      threw = true;
+      const m = String(e.message);
+      expect(
+        m.includes("IpTreasuryAlreadySet") || m.includes("0x17ae"),
+        "expected IpTreasuryAlreadySet, got:\n" + m.slice(-400)
+      ).to.equal(true);
+    }
+    expect(threw, "second set_ip_treasury must revert").to.equal(true);
+    // The original treasury is unchanged.
+    expect(
+      getTokenVerification(svm, program, tvAddr).ipTreasury.toBase58()
+    ).to.equal(treasury1.toBase58());
+  });
+});
+
 describe("SPEC-DBC-AUDIT-001 — single-role operator enforcement (REQ-D-004)", () => {
   let svm: LiteSVM;
   let program: VirtualCurveProgram;

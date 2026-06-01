@@ -6,6 +6,7 @@ import {
   createConfig,
   CreateConfigParams,
   createPoolWithSplToken,
+  progressCurveToGraduation,
   MigratedPoolMarketCapFeeSchedulerParams,
   swap,
   SwapMode,
@@ -398,17 +399,9 @@ async function fullFlow(
   const virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
   console.log("swap full curve");
-  await swap(svm, program, {
-    config,
-    payer: user,
-    pool: virtualPool,
-    inputTokenMint: NATIVE_MINT,
-    outputTokenMint: virtualPoolState.baseMint,
-    amountIn: new BN(LAMPORTS_PER_SOL * 5.5),
-    minimumAmountOut: new BN(0),
-    swapMode: SwapMode.PartialFill,
-    referralTokenAccount: null,
-  });
+  // SPEC-DBC-AUDIT-001: graduate via many sub-5% buyers instead of a single
+  // `5.5 SOL` buy that would trip the 5% holding cap.
+  await progressCurveToGraduation(svm, program, config, virtualPool);
 
   console.log("Create meteora damm v2 metadata");
   await createMeteoraDammV2Metadata(svm, program, {

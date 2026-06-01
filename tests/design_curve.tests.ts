@@ -5,6 +5,7 @@ import {
   CreateConfigParams,
   createLocker,
   createPoolWithSplToken,
+  progressCurveToGraduation,
   swap,
   SwapMode,
   SwapParams,
@@ -206,18 +207,12 @@ async function fullFlow(
   let configState = getConfig(svm, program, config);
 
   // swap
-  const params: SwapParams = {
-    config,
-    payer: user,
-    pool: virtualPool,
-    inputTokenMint: quoteMint,
-    outputTokenMint: virtualPoolState.baseMint,
-    amountIn: configState.migrationQuoteThreshold,
-    minimumAmountOut: new BN(0),
-    swapMode: SwapMode.ExactIn,
-    referralTokenAccount: null,
-  };
-  await swap(svm, program, params);
+  // SPEC-DBC-AUDIT-001: graduate via many sub-5% buyers instead of a single
+  // `migrationQuoteThreshold` buy that would trip the holding cap. `admin` is
+  // the custom quote-mint authority used to fund each buyer.
+  await progressCurveToGraduation(svm, program, config, virtualPool, {
+    quoteMintAuthority: admin,
+  });
 
   // migrate
   const poolAuthority = derivePoolAuthority();

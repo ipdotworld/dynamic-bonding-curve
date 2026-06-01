@@ -10,6 +10,7 @@ import {
   CreateConfigParams,
   createLocker,
   createPoolWithSplToken,
+  progressCurveToGraduation,
   creatorWithdrawSurplus,
   swap,
   SwapMode,
@@ -128,7 +129,8 @@ describe("Update creator", () => {
       poolCreator,
       newPoolCreator,
       user,
-      quoteMint
+      quoteMint,
+      admin
     );
   });
 
@@ -205,7 +207,8 @@ async function fullFlowUpdateCreatorInPreBondingCurve(
   poolCreator: Keypair,
   newCreator: Keypair,
   user: Keypair,
-  quoteMint: PublicKey
+  quoteMint: PublicKey,
+  admin: Keypair
 ) {
   // create pool
   let virtualPool = await createPoolWithSplToken(svm, program, {
@@ -233,28 +236,13 @@ async function fullFlowUpdateCreatorInPreBondingCurve(
 
   let configState = getConfig(svm, program, config);
 
-  let amountIn: BN;
-  if (configState.collectFeeMode == 0) {
-    // over 20%
-    amountIn = configState.migrationQuoteThreshold
-      .mul(new BN(6))
-      .div(new BN(5));
-  } else {
-    amountIn = configState.migrationQuoteThreshold;
-  }
   // swap
-  const params: SwapParams = {
-    config,
-    payer: user,
-    pool: virtualPool,
-    inputTokenMint: quoteMint,
-    outputTokenMint: virtualPoolState.baseMint,
-    amountIn,
-    swapMode: SwapMode.PartialFill,
-    minimumAmountOut: new BN(0),
-    referralTokenAccount: null,
-  };
-  await swap(svm, program, params);
+  // SPEC-DBC-AUDIT-001: graduate via many sub-5% buyers instead of a single
+  // `migrationQuoteThreshold` buy that would trip the holding cap. `admin` is
+  // the custom quote-mint authority used to fund each buyer.
+  await progressCurveToGraduation(svm, program, config, virtualPool, {
+    quoteMintAuthority: admin,
+  });
 
   // SPEC-DBC-004 Phase 3 (REQ-I-001): `claim_creator_trading_fee` removed.
   // Creator earnings now flow exclusively through `creator_withdraw_surplus`.
@@ -293,28 +281,13 @@ async function fullFlowUpdateCreatorPoolCreated(
 
   let configState = getConfig(svm, program, config);
 
-  let amountIn: BN;
-  if (configState.collectFeeMode == 0) {
-    // over 20%
-    amountIn = configState.migrationQuoteThreshold
-      .mul(new BN(6))
-      .div(new BN(5));
-  } else {
-    amountIn = configState.migrationQuoteThreshold;
-  }
   // swap
-  const params: SwapParams = {
-    config,
-    payer: user,
-    pool: virtualPool,
-    inputTokenMint: quoteMint,
-    outputTokenMint: virtualPoolState.baseMint,
-    amountIn,
-    minimumAmountOut: new BN(0),
-    swapMode: SwapMode.PartialFill,
-    referralTokenAccount: null,
-  };
-  await swap(svm, program, params);
+  // SPEC-DBC-AUDIT-001: graduate via many sub-5% buyers instead of a single
+  // `migrationQuoteThreshold` buy that would trip the holding cap. `admin` is
+  // the custom quote-mint authority used to fund each buyer.
+  await progressCurveToGraduation(svm, program, config, virtualPool, {
+    quoteMintAuthority: admin,
+  });
 
   // migrate
   const poolAuthority = derivePoolAuthority();
