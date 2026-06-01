@@ -48,3 +48,6 @@ pub mod test_fee_distribution;
 
 #[cfg(test)]
 mod test_invalid_migrated_fee_config;
+
+#[cfg(test)]
+mod test_hook_id_wiring;

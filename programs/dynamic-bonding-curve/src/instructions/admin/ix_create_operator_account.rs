@@ -1,7 +1,6 @@
 use crate::{
-    constants::{seeds::OPERATOR_PREFIX, MAX_OPERATION},
-    state::Operator,
-    PoolError,
+    constants::seeds::OPERATOR_PREFIX,
+    state::{operator::validate_single_role_permission, Operator},
 };
 use anchor_lang::prelude::*;
 
@@ -35,11 +34,9 @@ pub fn handle_create_operator_account(
     ctx: Context<CreateOperatorAccountCtx>,
     permission: u128,
 ) -> Result<()> {
-    // validate permission, only support 2 operations for now
-    require!(
-        permission > 0 && permission < 1 << MAX_OPERATION,
-        PoolError::InvalidPermission
-    );
+    // REQ-D-004: single valid role per operator account. Rejects zero, multi-bit
+    // (multiple simultaneous roles), and reserved/dead slot bits.
+    validate_single_role_permission(permission)?;
 
     let mut operator = ctx.accounts.operator.load_init()?;
     operator.initialize(ctx.accounts.whitelisted_address.key(), permission);

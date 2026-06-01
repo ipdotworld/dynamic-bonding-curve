@@ -1,6 +1,5 @@
 //! Error module includes error messages and codes of the program
 use anchor_lang::prelude::*;
-use protocol_zap::error::ProtozolZapError;
 
 /// Error messages and codes of the program
 #[error_code]
@@ -99,11 +98,6 @@ pub enum PoolError {
     #[msg("Invalid vesting parameters")]
     InvalidVestingParameters,
 
-    // Deprecated (AC-A08): leftover_receiver removed from PoolConfig.
-    // Kept for IDL compatibility (error code number must not shift).
-    #[msg("Invalid leftover address")]
-    InvalidLeftoverAddress,
-
     #[msg("Liquidity in bonding curve is insufficient")]
     InsufficientLiquidity,
 
@@ -143,9 +137,6 @@ pub enum PoolError {
     #[msg("Undertermined error")]
     UndeterminedError,
 
-    #[msg("Rate limiter not supported")]
-    RateLimiterNotSupported,
-
     #[msg("Amount left is not zero")]
     AmountLeftIsNotZero,
 
@@ -158,14 +149,8 @@ pub enum PoolError {
     #[msg("Invalid pool creation fee")]
     InvalidPoolCreationFee,
 
-    #[msg("Pool creation fee has been claimed")]
-    PoolCreationFeeHasBeenClaimed,
-
     #[msg("Not permit to do this action")]
     Unauthorized,
-
-    #[msg("Pool creation fee is zero")]
-    ZeroPoolCreationFee,
 
     #[msg("Invalid migration locked liquidity")]
     InvalidMigrationLockedLiquidity,
@@ -182,24 +167,6 @@ pub enum PoolError {
     #[msg("Invalid permission")]
     InvalidPermission,
 
-    #[msg("Invalid withdraw protocol fee zap accounts")]
-    InvalidWithdrawProtocolFeeZapAccounts,
-
-    #[msg("SOL,USDC protocol fee cannot be withdrawn via zap")]
-    MintRestrictedFromZap,
-
-    #[msg("Invalid zap out parameters")]
-    InvalidZapOutParameters,
-
-    #[msg("CPI disabled")]
-    CpiDisabled,
-
-    #[msg("Missing zap out instruction")]
-    MissingZapOutInstruction,
-
-    #[msg("Invalid zap accounts")]
-    InvalidZapAccounts,
-
     #[msg("Invalid compounding parameters")]
     InvalidCompoundingParameters,
 
@@ -211,9 +178,6 @@ pub enum PoolError {
 
     #[msg("Trade authorization has expired")]
     TradeAuthExpired,
-
-    #[msg("Must claim accumulated fees before transferring creator role")]
-    UnclaimedFees,
 
     #[msg("Invalid authority address")]
     InvalidAuthority,
@@ -230,9 +194,6 @@ pub enum PoolError {
     #[msg("IP treasury address is already set and cannot be changed")]
     IpTreasuryAlreadySet,
 
-    #[msg("Token is not verified — TokenVerification PDA does not exist")]
-    NotVerified,
-
     #[msg("No pending IP owner transfer proposal")]
     NoPendingIpOwner,
 
@@ -247,21 +208,13 @@ pub enum PoolError {
 
     #[msg("Operator permission slot is reserved or no longer supported — see SPEC-DBC-004 REQ-I-004")]
     UnsupportedOperatorPermission,
-}
 
-impl From<ProtozolZapError> for PoolError {
-    fn from(e: ProtozolZapError) -> Self {
-        match e {
-            ProtozolZapError::MathOverflow => PoolError::MathOverflow,
-            ProtozolZapError::InvalidZapOutParameters => PoolError::InvalidZapOutParameters,
-            ProtozolZapError::TypeCastFailed => PoolError::TypeCastFailed,
-            ProtozolZapError::MissingZapOutInstruction => PoolError::MissingZapOutInstruction,
-            ProtozolZapError::InvalidWithdrawProtocolFeeZapAccounts => {
-                PoolError::InvalidWithdrawProtocolFeeZapAccounts
-            }
-            ProtozolZapError::MintRestrictedFromZap => PoolError::MintRestrictedFromZap,
-            ProtozolZapError::CpiDisabled => PoolError::CpiDisabled,
-            ProtozolZapError::InvalidZapAccounts => PoolError::InvalidZapAccounts,
-        }
-    }
+    #[msg("Referral payout requested but TokenVerification account was not provided")]
+    MissingTokenVerification,
+
+    #[msg("TokenVerification account is not the canonical PDA / not owned by this program")]
+    InvalidTokenVerification,
+
+    #[msg("Referral token account is not owned by the registered referral wallet")]
+    InvalidReferralAccount,
 }

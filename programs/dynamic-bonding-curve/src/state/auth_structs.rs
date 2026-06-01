@@ -15,6 +15,11 @@ pub struct LaunchAuth {
 
 /// Signed by backend to authorize trading. Reusable within the TTL window.
 /// Platform-wide (not per-pool) — user can trade any pool until expiry.
+///
+/// SPEC-DBC-AUDIT-001 REQ-D-005 (D5, ACCEPTED RISK): `expires_at` is a backend-set
+/// TTL with NO on-chain cap, so a leaked TradeAuth signature has a platform-wide
+/// blast radius until expiry. Accepted under the backend-trust assumption; no
+/// on-chain TTL cap is added (out of scope). See Risk Register RR-10.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct TradeAuth {
     /// Must match the payer/signer of the swap tx
@@ -23,48 +28,8 @@ pub struct TradeAuth {
     pub expires_at: i64,
 }
 
-/// Signed by backend to authorize IP owner verification for a specific pool.
-/// Single-use because TokenVerification PDA can only be initialized once.
-#[derive(BorshSerialize, BorshDeserialize)]
-pub struct VerifyAuth {
-    /// Must match the pool account passed to verify_token
-    pub pool: Pubkey,
-    /// IP owner wallet to record in the TokenVerification PDA
-    pub ip_owner: Pubkey,
-}
-
-/// Signed by backend to authorize IP owner transfer proposal.
-#[derive(BorshSerialize, BorshDeserialize)]
-pub struct TransferIpOwnerAuth {
-    /// Must match the pool account passed to transfer_ip_owner
-    pub pool: Pubkey,
-    /// New IP owner wallet to set as pending_ip_owner
-    pub new_ip_owner: Pubkey,
-}
-
-/// Signed by backend to authorize setting the IP treasury address (one-time).
-#[derive(BorshSerialize, BorshDeserialize)]
-pub struct SetIpTreasuryAuth {
-    /// Must match the pool account passed to set_ip_treasury
-    pub pool: Pubkey,
-    /// Community treasury wallet to record in the TokenVerification PDA
-    pub treasury: Pubkey,
-}
-
-/// Signed by backend to authorize referral proposal.
-#[derive(BorshSerialize, BorshDeserialize)]
-pub struct SetReferralAuth {
-    /// Must match the pool account passed to set_referral
-    pub pool: Pubkey,
-    /// New referral wallet to set as pending_referral
-    pub new_referral: Pubkey,
-}
-
-/// Signed by backend to authorize linking a token pool to an IPA identifier.
-#[derive(BorshSerialize, BorshDeserialize)]
-pub struct LinkTokenToIpAuth {
-    /// Must match the pool account passed to link_token_to_ip
-    pub pool: Pubkey,
-    /// IPA identifier to store in the TokenVerification PDA
-    pub ipa_id: Pubkey,
-}
+// SPEC-DBC-AUDIT-001 Phase 4 (REQ-D-002): the relayed-Ed25519 auth structs for the
+// five backend admin ops — `VerifyAuth`, `TransferIpOwnerAuth`, `SetIpTreasuryAuth`,
+// `SetReferralAuth`, `LinkTokenToIpAuth` — were REMOVED. Those ops now use operator
+// direct-signing (no replayable signed message). `LaunchAuth` and `TradeAuth` remain:
+// they back the user-payable Ed25519 model for pool creation / swap (REQ-D-003).

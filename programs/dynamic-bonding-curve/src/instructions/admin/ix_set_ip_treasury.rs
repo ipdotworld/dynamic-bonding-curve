@@ -1,31 +1,16 @@
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::sysvar;
-use crate::state::{IpworldState, TokenVerification, SetIpTreasuryAuth};
-use crate::utils::verify_authority_sig::verify_authority_sig;
+use crate::state::{Operator, TokenVerification};
 use crate::PoolError;
+use anchor_lang::prelude::*;
 
 /// Sets the IP treasury address on the TokenVerification PDA (one-time, immutable).
 ///
-/// Transaction layout:
-///   ix[N-1]: Ed25519Program.verify(signature, authority, SetIpTreasuryAuth{pool, treasury})
-///   ix[N]:   DBC.set_ip_treasury(pool)
-///
-/// Once set, `ip_treasury` cannot be changed. Any attempt to call this instruction
-/// again will fail with `IpTreasuryAlreadySet`. Follows EVM `setIpTreasury()` (E-01).
+/// SPEC-DBC-AUDIT-001 Phase 4 (REQ-D-002): authorization is now **operator
+/// direct-signing**. The operator signs directly AND must hold the
+/// `OperatorPermission::VerifyToken` role (enforced by `#[access_control(...)]` in
+/// `lib.rs`). The relayed-Ed25519 path is removed; `treasury` is an instruction
+/// argument. Once set, `ip_treasury` cannot be changed (mirrors EVM `setIpTreasury()`).
 #[derive(Accounts)]
 pub struct SetIpTreasuryCtx<'info> {
-    /// Instructions sysvar — used to verify the preceding Ed25519 instruction.
-    /// CHECK: Read-only sysvar; validated inside verify_authority_sig.
-    #[account(address = sysvar::instructions::ID)]
-    pub instruction_sysvar: AccountInfo<'info>,
-
-    /// Platform-wide state holding the backend authority public key.
-    #[account(
-        seeds = [IpworldState::SEED],
-        bump = ipworld_state.bump,
-    )]
-    pub ipworld_state: Account<'info, IpworldState>,
-
     /// Per-pool IP owner verification record.
     #[account(
         mut,
@@ -37,25 +22,18 @@ pub struct SetIpTreasuryCtx<'info> {
     /// The pool this verification record belongs to.
     /// CHECK: Validated indirectly via TokenVerification PDA seeds.
     pub pool: AccountInfo<'info>,
+
+    /// Operator account holding the `VerifyToken` role. Validated by
+    /// `#[access_control(is_valid_operator_role(.., VerifyToken))]` in lib.rs.
+    pub operator: AccountLoader<'info, Operator>,
+
+    /// The operator's whitelisted signer — must sign the transaction directly.
+    pub signer: Signer<'info>,
 }
 
-pub fn handle_set_ip_treasury(ctx: Context<SetIpTreasuryCtx>) -> Result<()> {
-    let auth: SetIpTreasuryAuth = verify_authority_sig(
-        &ctx.accounts.instruction_sysvar,
-        &ctx.accounts.ipworld_state,
-    )?;
-
-    // Ensure the signed message refers to the same pool as the account passed in.
-    require!(
-        auth.pool == ctx.accounts.pool.key(),
-        PoolError::InvalidAccount
-    );
-
+pub fn handle_set_ip_treasury(ctx: Context<SetIpTreasuryCtx>, treasury: Pubkey) -> Result<()> {
     // Reject zero address.
-    require!(
-        auth.treasury != Pubkey::default(),
-        PoolError::InvalidOwnerAccount
-    );
+    require!(treasury != Pubkey::default(), PoolError::InvalidOwnerAccount);
 
     // One-time only: revert if already set.
     require!(
@@ -63,7 +41,7 @@ pub fn handle_set_ip_treasury(ctx: Context<SetIpTreasuryCtx>) -> Result<()> {
         PoolError::IpTreasuryAlreadySet
     );
 
-    ctx.accounts.token_verification.ip_treasury = auth.treasury;
+    ctx.accounts.token_verification.ip_treasury = treasury;
 
     Ok(())
 }

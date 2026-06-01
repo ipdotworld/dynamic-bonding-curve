@@ -15,10 +15,9 @@ export type PartnerMetadata =
   IdlAccounts<DynamicBondingCurve>["partnerMetadata"];
 export type VirtualPoolMetadata =
   IdlAccounts<DynamicBondingCurve>["virtualPoolMetadata"];
-export type ClaimFeeOperator =
-  IdlAccounts<DynamicBondingCurve>["claimFeeOperator"];
-export type MeteoraDammMigrationMetadata =
-  IdlAccounts<DynamicBondingCurve>["meteoraDammMigrationMetadata"];
+// SPEC-DBC-AUDIT-001: ClaimFeeOperator (ClaimFeeOperator cluster) and
+// MeteoraDammMigrationMetadata (DAMM v2 metadata instruction) accounts were
+// removed from the program. Their helper type aliases are deleted accordingly.
 export type LockEscrow = IdlAccounts<DynamicAmm>["lockEscrow"];
 export type DammV1Pool = IdlAccounts<DammV1>["pool"];
 export type DammV2Pool = IdlAccounts<DammV2>["pool"];

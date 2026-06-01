@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::{
     const_pda,
@@ -49,27 +48,8 @@ pub struct WithdrawMigrationFeeCtx<'info> {
     pub token_quote_program: Interface<'info, TokenInterface>,
 }
 
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    IntoPrimitive,
-    TryFromPrimitive,
-    AnchorDeserialize,
-    AnchorSerialize,
-    Default,
-)]
-pub enum SenderFlag {
-    #[default]
-    Partner,
-    Creator,
-}
-
 pub fn handle_withdraw_migration_fee<'c: 'info, 'info>(
     ctx: Context<'_, '_, 'c, 'info, WithdrawMigrationFeeCtx<'info>>,
-    flag: u8, // retained for interface compatibility; only flag=0 (operator) is valid post A-04
 ) -> Result<()> {
     let config = ctx.accounts.config.load()?;
     let mut pool = ctx.accounts.virtual_pool.load_mut()?;
@@ -80,15 +60,10 @@ pub fn handle_withdraw_migration_fee<'c: 'info, 'info>(
         PoolError::NotPermitToDoThisAction
     );
 
-    // A-04: Partner/creator split removed. The entire migration fee goes to the caller
-    // (operator/treasury). Both masks must be unclaimed for the full withdrawal.
-    let sender_flag = SenderFlag::try_from(flag).map_err(|_| PoolError::TypeCastFailed)?;
-
-    // Only the operator (fee_claimer) may call this post A-04
-    require!(
-        sender_flag == SenderFlag::Partner,
-        PoolError::NotPermitToDoThisAction
-    );
+    // A-04: Partner/creator split removed. The entire migration fee goes to the
+    // operator/treasury. The `SenderFlag`/`flag` parameter was a vestigial no-op
+    // (only flag=0 was ever valid); the real authorization is the fee_claimer
+    // check below.
     require!(
         ctx.accounts.sender.key() == config.fee_claimer,
         PoolError::NotPermitToDoThisAction
@@ -131,7 +106,6 @@ pub fn handle_withdraw_migration_fee<'c: 'info, 'info>(
     emit_cpi!(EvtWithdrawMigrationFee {
         pool: ctx.accounts.virtual_pool.key(),
         fee: total_migration_fee,
-        flag
     });
     Ok(())
 }

@@ -2,26 +2,24 @@ use std::u128;
 
 use anchor_lang::{prelude::*, solana_program::clock::SECONDS_PER_DAY};
 use anchor_spl::token_interface::Mint;
-use damm_v2::constants::MAX_BASIS_POINT;
 use locker::types::CreateVestingEscrowParameters;
 use static_assertions::const_assert_eq;
 
 use crate::{
     activation_handler::ActivationType,
     constants::{
-        fee::{MAX_POOL_CREATION_FEE, MIN_POOL_CREATION_FEE, PROTOCOL_LIQUIDITY_MIGRATION_FEE_BPS},
+        fee::{MAX_POOL_CREATION_FEE, MIN_POOL_CREATION_FEE},
         MAX_CURVE_POINT, MAX_LOCK_DURATION_IN_SECONDS, MAX_MIGRATED_POOL_FEE_BPS,
         MAX_MIGRATION_FEE_PERCENTAGE, MAX_SQRT_PRICE, MIN_LOCKED_LIQUIDITY_BPS,
-        MIN_MIGRATED_POOL_FEE_BPS, MIN_SQRT_PRICE,
+        MIN_MIGRATED_POOL_FEE_BPS, MIN_SQRT_PRICE, TOKEN_VESTING_NUMBER_OF_PERIODS,
+        TOKEN_VESTING_PERIOD_FREQUENCY,
     },
     state::config::FEE_SHARE_PRECISION,
     damm_v2_utils::{
         validate_vesting_parameters, BaseFeeMode as DammV2BaseFeeMode, DammV2DynamicFee,
         DammV2PodAlignedFeeMarketCapScheduler,
     },
-    migration_handler::{
-        get_migration_handler, CompoundingLiquidity, MigratedCollectFeeMode, MigrationHandler,
-    },
+    migration_handler::{get_migration_handler, MigratedCollectFeeMode},
     params::{
         fee_parameters::{to_numerator, PoolFeeParameters},
         liquidity_distribution::{
@@ -72,12 +70,13 @@ pub struct ConfigParameters {
     pub padding: [u8; 2],
     pub curve: Vec<LiquidityDistributionParameters>,
     /// IPWorld fee shares (in FEE_SHARE_PRECISION = 1_000_000 units)
-    /// ip_owner_share + airdrop_share + referral_share must be < 1_000_000
+    /// ip_owner_share + airdrop_share must be < 1_000_000
     /// (SPEC-DBC-004 Phase 3 — REQ-I-001: `creator_share` removed from the
-    /// IPWorld 4-way SELL fee model)
+    /// IPWorld SELL fee model; SPEC-DBC-AUDIT-001 Phase 8 — REQ-A-005:
+    /// `referral_share` removed — referral is handled externally via the
+    /// `pool_fees` referral_fee, not a config share)
     pub ip_owner_share: u32,
     pub airdrop_share: u32,
-    pub referral_share: u32,
     /// token_airdrop_share must be < 1_000_000 (independent of quote fee shares)
     pub token_airdrop_share: u32,
 }
@@ -178,24 +177,12 @@ impl MigratedPoolFeeValidator {
             PoolError::InvalidMigratedFeeConfig
         );
 
-        // validate collect fee mode
-        let migrated_collect_fee_mode = MigratedCollectFeeMode::try_from(self.collect_fee_mode)
+        // validate collect fee mode is a known enum value (rejects garbage u8).
+        // The Compounding-specific compounding_fee_bps validation is unreachable:
+        // the REQ-I-002 firewall above already pins collect_fee_mode == QuoteToken
+        // and compounding_fee_bps == 0, so only the QuoteToken case can be reached.
+        MigratedCollectFeeMode::try_from(self.collect_fee_mode)
             .map_err(|_| PoolError::InvalidCollectFeeMode)?;
-
-        match migrated_collect_fee_mode {
-            MigratedCollectFeeMode::Compounding => {
-                require!(
-                    self.compounding_fee_bps > 0 && self.compounding_fee_bps <= MAX_BASIS_POINT,
-                    PoolError::InvalidMigratedPoolFee
-                );
-            }
-            _ => {
-                require!(
-                    self.compounding_fee_bps == 0,
-                    PoolError::InvalidMigratedPoolFee
-                );
-            }
-        }
         // validate migrated dynamic fee option
         require!(
             DammV2DynamicFee::try_from(self.dynamic_fee).is_ok(),
@@ -295,21 +282,63 @@ impl LockedVestingParams {
         }
     }
 
+    /// Builds the Meteora locker escrow params for the migration token-allocation
+    /// vesting.
+    ///
+    /// SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001): the token allocation vests **linearly
+    /// over a fixed 180 days, with no cliff, anchored to the migration (finish-curve)
+    /// timestamp**. The duration is enforced by program constants
+    /// (`TOKEN_VESTING_PERIOD_FREQUENCY * TOKEN_VESTING_NUMBER_OF_PERIODS == 180 days`)
+    /// and is NO LONGER taken from the mutable per-pool `LockedVestingConfig`
+    /// (`frequency` / `number_of_period` / `cliff_duration_from_migration_time`), so the
+    /// effective vesting duration cannot be misconfigured. This mirrors the EVM
+    /// `IPOwnerVault.sol` linear-no-cliff token vesting.
+    ///
+    /// The TOTAL vested amount and the RECIPIENT are preserved: the locker debits
+    /// exactly `cliff_unlock_amount + amount_per_period * number_of_period` from the
+    /// base vault (`CreateVestingEscrowParameters::get_total_deposit_amount`), and we
+    /// keep that sum bit-for-bit equal to the configured `get_total_amount()`. The
+    /// schedule is made fully linear by spreading the total evenly across 180 daily
+    /// periods; the sub-`number_of_periods` integer-division remainder (`0..179` base
+    /// units — rounding dust, NOT an economic cliff) is placed in `cliff_unlock_amount`
+    /// at `cliff_time == vesting_start_time` so the deposited total stays exact.
+    ///
+    /// `no cliff` ⇒ `cliff_time == vesting_start_time` (no time delay) and
+    /// `cliff_unlock_amount < number_of_period` (no meaningful upfront unlock).
     pub fn to_create_vesting_escrow_params(
         &self,
         finish_curve_timestamp: u64,
     ) -> Result<CreateVestingEscrowParameters> {
-        let cliff_time =
-            finish_curve_timestamp.saturating_add(self.cliff_duration_from_migration_time);
+        // Preserve the configured total token allocation exactly.
+        let total_amount = self.get_total_amount()?;
+
+        // Fully linear over 180 daily periods. Floor-divide and place the remainder at
+        // the (zero-delay) cliff so the locker's deposited total == total_amount.
+        let amount_per_period = total_amount.safe_div(TOKEN_VESTING_NUMBER_OF_PERIODS)?;
+        let cliff_unlock_amount =
+            total_amount.safe_sub(amount_per_period.safe_mul(TOKEN_VESTING_NUMBER_OF_PERIODS)?)?;
+
         Ok(CreateVestingEscrowParameters {
+            // Anchored to the migration / finish-curve timestamp.
             vesting_start_time: finish_curve_timestamp,
-            cliff_time,
-            frequency: self.frequency,
-            cliff_unlock_amount: self.cliff_unlock_amount,
-            amount_per_period: self.amount_per_period,
-            number_of_period: self.number_of_period,
+            // No cliff: cliff_time == vesting_start_time (no delay).
+            cliff_time: finish_curve_timestamp,
+            // Fixed 180-day linear schedule (program constants, not config).
+            frequency: TOKEN_VESTING_PERIOD_FREQUENCY,
+            number_of_period: TOKEN_VESTING_NUMBER_OF_PERIODS,
+            amount_per_period,
+            // Rounding remainder only (`< number_of_period`); not an economic cliff.
+            cliff_unlock_amount,
             update_recipient_mode: 2, // only recipient
-            cancel_mode: 1,           // only creator
+            // SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001): "no clawback".
+            // `cancel_mode = 0` (CancelMode::NeitherCreatorOrRecipient) means NO ONE can
+            // cancel the escrow — the creator cannot reclaim unvested tokens early (no rug
+            // of their own vesting). The Meteora locker gates cancellation on
+            // `cancel_mode & signer_flag(signer) > 0`, which is always false when
+            // cancel_mode == 0, so cancellation is impossible. Do NOT change back to 1
+            // ("only creator"), which would reintroduce a clawback path. This value is the
+            // one consumed by the `create_locker` CPI (instructions/migration/create_locker.rs).
+            cancel_mode: 0,
         })
     }
 
@@ -545,11 +574,11 @@ impl ConfigParameters {
         // Validate IPWorld fee shares
         // Quote fee shares (SELL side): sum must be strictly less than FEE_SHARE_PRECISION (remainder goes to protocol treasury)
         // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed from the sum.
+        // SPEC-DBC-AUDIT-001 Phase 8 (REQ-A-005): `referral_share` removed from the sum
+        // (referral is a separate `pool_fees` referral_fee, not a config share).
         let total_quote_share = self
             .ip_owner_share
             .checked_add(self.airdrop_share)
-            .ok_or(PoolError::MathOverflow)?
-            .checked_add(self.referral_share)
             .ok_or(PoolError::MathOverflow)?;
         require!(
             total_quote_share < FEE_SHARE_PRECISION,
@@ -626,7 +655,6 @@ pub fn handle_create_config(
         compounding_fee_bps,
         ip_owner_share,
         airdrop_share,
-        referral_share,
         token_airdrop_share,
         ..
     } = config_parameters.clone();
@@ -653,7 +681,7 @@ pub fn handle_create_config(
         migrated_collect_fee_mode,
         migration_sqrt_price,
     );
-    let (included_protocol_fee_migration_base_amount, included_protocol_fee_migration_quote_amount) =
+    let (included_protocol_fee_migration_base_amount, _included_protocol_fee_migration_quote_amount) =
         liquidity_handler.get_included_protocol_fee_migration_amounts_1(
             migration_quote_threshold,
             migration_fee.fee_percentage,
@@ -665,30 +693,9 @@ pub fn handle_create_config(
         PoolError::InvalidCurve
     );
 
-    if migration_option_enum == MigrationOption::DammV2
-        && migrated_collect_fee_mode == MigratedCollectFeeMode::Compounding
-    {
-        let compounding_liquidity = CompoundingLiquidity {
-            migration_sqrt_price,
-        };
-        let (protocol_migration_base_fee, protocol_migration_quote_fee) = compounding_liquidity
-            .get_migration_protocol_fees(
-                included_protocol_fee_migration_base_amount,
-                included_protocol_fee_migration_quote_amount,
-                PROTOCOL_LIQUIDITY_MIGRATION_FEE_BPS.into(),
-            )?;
-
-        let excluded_protocol_fee_migration_base_amount =
-            included_protocol_fee_migration_base_amount.safe_sub(protocol_migration_base_fee)?;
-        let excluded_protocol_fee_migration_quote_amount =
-            included_protocol_fee_migration_quote_amount.safe_sub(protocol_migration_quote_fee)?;
-
-        CompoundingLiquidity::validate_initial_pool_information(
-            excluded_protocol_fee_migration_base_amount,
-            excluded_protocol_fee_migration_quote_amount,
-            migration_sqrt_price,
-        )?;
-    }
+    // The Compounding-mode migration pre-validation was removed: Compounding is
+    // rejected by the REQ-I-002 firewall in `validate_config_parameters`, so this
+    // branch was unreachable dead code (it only computed and discarded fee amounts).
 
     let (fixed_token_supply_flag, pre_migration_token_supply, post_migration_token_supply) =
         if let Some(TokenSupplyParams {
@@ -772,7 +779,6 @@ pub fn handle_create_config(
         enable_first_swap_with_min_fee.into(),
         ip_owner_share,
         airdrop_share,
-        referral_share,
         token_airdrop_share,
     )?;
 
@@ -818,4 +824,151 @@ pub fn handle_create_config(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod token_vesting_tests {
+    use super::*;
+    use crate::constants::TOKEN_VESTING_DURATION_SECONDS;
+
+    // SPEC-DBC-AUDIT-001 REQ-C-001 / AC-C-001: the migration locker token-allocation
+    // vesting is a fixed 180-day, linear, no-cliff schedule anchored to the migration
+    // (finish-curve) timestamp, regardless of the per-pool LockedVestingConfig — while
+    // preserving the configured TOTAL amount and RECIPIENT.
+
+    /// The fixed schedule constants span exactly 180 days.
+    #[test]
+    fn effective_duration_is_180_days() {
+        assert_eq!(
+            TOKEN_VESTING_PERIOD_FREQUENCY * TOKEN_VESTING_NUMBER_OF_PERIODS,
+            TOKEN_VESTING_DURATION_SECONDS
+        );
+        assert_eq!(TOKEN_VESTING_DURATION_SECONDS, 180 * 86_400);
+    }
+
+    /// SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001) "no clawback": the locker CPI params use
+    /// `cancel_mode == 0` (CancelMode::NeitherCreatorOrRecipient) for every config, so no
+    /// one — including the creator — can cancel the escrow and reclaim unvested tokens.
+    #[test]
+    fn cancel_mode_is_no_clawback() {
+        // A config with a real vesting amount.
+        let params = LockedVestingParams {
+            amount_per_period: 1_000_000,
+            cliff_duration_from_migration_time: 0,
+            frequency: 1,
+            number_of_period: 10,
+            cliff_unlock_amount: 1_000_000_000,
+        };
+        let escrow = params.to_create_vesting_escrow_params(1_700_000_000).unwrap();
+        assert_eq!(
+            escrow.cancel_mode, 0,
+            "cancel_mode must be 0 (no clawback): no one can cancel the vesting escrow"
+        );
+
+        // Also holds for the all-zero (no-vesting) config.
+        let zero = LockedVestingParams::default();
+        let escrow_zero = zero.to_create_vesting_escrow_params(42).unwrap();
+        assert_eq!(escrow_zero.cancel_mode, 0);
+    }
+
+    /// For an arbitrary config, the built escrow params:
+    /// - span exactly 180 days (`frequency * number_of_period`),
+    /// - have no cliff (`cliff_time == vesting_start_time`, `cliff_unlock < number_of_period`),
+    /// - are anchored to `finish_curve_timestamp`,
+    /// - and preserve the configured total (`get_total_deposit_amount == get_total_amount`).
+    fn assert_180d_linear_no_cliff(params: LockedVestingParams, finish_curve_timestamp: u64) {
+        let configured_total = params.get_total_amount().unwrap();
+        let escrow = params
+            .to_create_vesting_escrow_params(finish_curve_timestamp)
+            .unwrap();
+
+        // Effective duration = frequency * number_of_period = 180 days.
+        assert_eq!(
+            escrow.frequency * escrow.number_of_period,
+            TOKEN_VESTING_DURATION_SECONDS,
+            "effective token-vesting duration must be 180 days"
+        );
+
+        // Anchored to migration timestamp, no cliff delay.
+        assert_eq!(escrow.vesting_start_time, finish_curve_timestamp);
+        assert_eq!(
+            escrow.cliff_time, escrow.vesting_start_time,
+            "cliff_time must equal vesting_start_time (no cliff delay)"
+        );
+
+        // No meaningful upfront unlock: remainder dust only (< number_of_period).
+        assert!(
+            escrow.cliff_unlock_amount < escrow.number_of_period,
+            "cliff_unlock_amount ({}) must be rounding dust < number_of_period ({})",
+            escrow.cliff_unlock_amount,
+            escrow.number_of_period
+        );
+
+        // Total deposited by the locker == configured total (bit-for-bit). The locker
+        // debits `cliff_unlock_amount + amount_per_period * number_of_period` (its
+        // `get_total_deposit_amount`); the IDL-generated type exposes only the fields,
+        // so we reconstruct the sum here.
+        let deposited = escrow.cliff_unlock_amount
+            + escrow.amount_per_period * escrow.number_of_period;
+        assert_eq!(
+            deposited, configured_total,
+            "locker deposit total must equal configured get_total_amount()"
+        );
+
+        // update_recipient_mode unchanged (2 = only recipient).
+        assert_eq!(escrow.update_recipient_mode, 2);
+        // SPEC-DBC-AUDIT-001 REQ-C-001 (AC-C-001) "no clawback": cancel_mode == 0
+        // (CancelMode::NeitherCreatorOrRecipient) — no one can cancel the escrow, so the
+        // creator cannot reclaim unvested tokens early.
+        assert_eq!(
+            escrow.cancel_mode, 0,
+            "cancel_mode must be 0 (no clawback): no one can cancel the vesting escrow"
+        );
+    }
+
+    /// Mirrors the on-chain test config (`tests/create_locker.tests.ts`): a large
+    /// upfront `cliff_unlock_amount` (1e9) + a short 10-step linear stream. The
+    /// rebuilt schedule must neutralise that cliff into a fully-linear 180-day
+    /// schedule while preserving the exact total.
+    #[test]
+    fn rebuilds_existing_cliff_config_into_180d_linear() {
+        let params = LockedVestingParams {
+            amount_per_period: 1_000_000,
+            cliff_duration_from_migration_time: 0,
+            frequency: 1,
+            number_of_period: 10,
+            cliff_unlock_amount: 1_000_000_000,
+        };
+        // total = 1e9 + 1e6 * 10 = 1_010_000_000
+        assert_eq!(params.get_total_amount().unwrap(), 1_010_000_000);
+        assert_180d_linear_no_cliff(params, 1_700_000_000);
+
+        // Spot-check the exact split: 1_010_000_000 / 180 = 5_611_111 rem 20.
+        let escrow = params.to_create_vesting_escrow_params(1_700_000_000).unwrap();
+        assert_eq!(escrow.amount_per_period, 5_611_111);
+        assert_eq!(escrow.cliff_unlock_amount, 20); // 1_010_000_000 - 5_611_111*180
+        assert_eq!(escrow.number_of_period, 180);
+        assert_eq!(escrow.frequency, 86_400);
+    }
+
+    /// A total that divides evenly by 180 yields zero cliff_unlock (pure linear).
+    #[test]
+    fn evenly_divisible_total_has_zero_cliff_unlock() {
+        let params = LockedVestingParams {
+            amount_per_period: 1_000_000,
+            cliff_duration_from_migration_time: 999, // ignored by the fixed schedule
+            frequency: 7,                            // ignored
+            number_of_period: 180,
+            cliff_unlock_amount: 0,
+        };
+        // total = 1e6 * 180 = 180_000_000, divisible by 180.
+        let escrow = params.to_create_vesting_escrow_params(42).unwrap();
+        assert_eq!(escrow.cliff_unlock_amount, 0);
+        assert_eq!(escrow.amount_per_period, 1_000_000);
+        assert_eq!(escrow.frequency * escrow.number_of_period, 15_552_000);
+        assert_eq!(
+            escrow.cliff_unlock_amount + escrow.amount_per_period * escrow.number_of_period,
+            180_000_000
+        );
+    }
 }

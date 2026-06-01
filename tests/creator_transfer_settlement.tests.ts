@@ -353,7 +353,7 @@ describe.skip("T-07: Creator Transfer Settlement", () => {
     });
 
     const swapIx = await program.methods
-      .swap2({ amount0: amount, amount1: new BN(0), swapMode: 1 })
+      .swap({ amount0: amount, amount1: new BN(0), swapMode: 1 })
       .accountsPartial({
         poolAuthority: derivePoolAuthority(),
         config,

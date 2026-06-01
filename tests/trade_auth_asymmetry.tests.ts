@@ -257,7 +257,7 @@ describe("T-05: TradeAuth Buy/Sell Asymmetry", () => {
 
   async function buildBuyIx(buyer: Keypair): Promise<import("@solana/web3.js").TransactionInstruction> {
     return await program.methods
-      .swap2({ amount0: new BN(LAMPORTS_PER_SOL * 0.01), amount1: new BN(0), swapMode: 1 })
+      .swap({ amount0: new BN(LAMPORTS_PER_SOL * 0.01), amount1: new BN(0), swapMode: 1 })
       .accountsPartial({
         poolAuthority: derivePoolAuthority(),
         config,
@@ -277,6 +277,8 @@ describe("T-05: TradeAuth Buy/Sell Asymmetry", () => {
         tokenBaseProgram: TOKEN_2022_PROGRAM_ID,
         tokenQuoteProgram: TOKEN_PROGRAM_ID,
         referralTokenAccount: null,
+        // SPEC-DBC-AUDIT-001: swap requires optional tokenVerification explicitly.
+        tokenVerification: null,
         ipworldState,
         instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })
@@ -291,7 +293,7 @@ describe("T-05: TradeAuth Buy/Sell Asymmetry", () => {
 
   async function buildSellIx(seller: Keypair, tokenAmount: BN): Promise<import("@solana/web3.js").TransactionInstruction> {
     return await program.methods
-      .swap2({ amount0: tokenAmount, amount1: new BN(0), swapMode: 1 })
+      .swap({ amount0: tokenAmount, amount1: new BN(0), swapMode: 1 })
       .accountsPartial({
         poolAuthority: derivePoolAuthority(),
         config,
@@ -311,6 +313,8 @@ describe("T-05: TradeAuth Buy/Sell Asymmetry", () => {
         tokenBaseProgram: TOKEN_2022_PROGRAM_ID,
         tokenQuoteProgram: TOKEN_PROGRAM_ID,
         referralTokenAccount: null,
+        // SPEC-DBC-AUDIT-001: swap requires optional tokenVerification explicitly.
+        tokenVerification: null,
         ipworldState,
         instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
       })

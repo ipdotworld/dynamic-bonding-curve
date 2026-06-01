@@ -11,6 +11,7 @@ import {
   createLocker,
   createPoolWithSplToken,
   creatorWithdrawSurplus,
+  progressCurveToGraduation,
   swap,
   SwapMode,
   SwapParams,
@@ -54,7 +55,13 @@ describe("Creator and Partner share trading fees and surplus", () => {
   let poolCreator: Keypair;
   let program: VirtualCurveProgram;
 
-  before(async () => {
+  // SPEC-DBC-AUDIT-001: use beforeEach (not before) so each of the 4 independent
+  // fee-split cases runs in a FRESH LiteSVM. Each case now graduates its curve via
+  // ~25 distinct sub-5% buyers (cap-aware), and LiteSVM rejects sends past ~98
+  // distinct fee-payers; sharing one svm across all 4 cases (≈100 buyers) would
+  // trip that ceiling on the last case. Each case already builds its own
+  // config/pool/quoteMint, so per-test isolation changes no assertion intent.
+  beforeEach(async () => {
     svm = startSvm();
     admin = generateAndFund(svm);
     operator = generateAndFund(svm);
@@ -349,28 +356,15 @@ async function fullFlow(
 
   let configState = getConfig(svm, program, config);
 
-  let amountIn;
-  if (configState.collectFeeMode == 0) {
-    // over 20%
-    amountIn = configState.migrationQuoteThreshold
-      .mul(new BN(6))
-      .div(new BN(5));
-  } else {
-    amountIn = configState.migrationQuoteThreshold;
-  }
   // swap
-  const params: SwapParams = {
-    config,
-    payer: user,
-    pool: virtualPool,
-    inputTokenMint: quoteMint,
-    outputTokenMint: virtualPoolState.baseMint,
-    amountIn,
-    minimumAmountOut: new BN(0),
-    swapMode: SwapMode.PartialFill,
-    referralTokenAccount: null,
-  };
-  await swap(svm, program, params);
+  // SPEC-DBC-AUDIT-001: graduate via many sub-5% buyers instead of a single
+  // `migrationQuoteThreshold` buy that would trip the holding cap. PartialFill
+  // ends at exactly the threshold regardless of collectFeeMode, so the prior
+  // "over 20%" handling for collectFeeMode==0 is no longer needed. `admin` is
+  // the custom quote-mint authority used to fund each buyer.
+  await progressCurveToGraduation(svm, program, config, virtualPool, {
+    quoteMintAuthority: admin,
+  });
 
   virtualPoolState = getVirtualPool(svm, program, virtualPool);
 

@@ -9,6 +9,7 @@ import {
   CreateConfigParams,
   createLocker,
   createPoolWithSplToken,
+  progressCurveToGraduation,
   partnerWithdrawMigrationFee,
   swap,
   SwapMode,
@@ -183,28 +184,14 @@ async function fullFlow(
 
   let configState = getConfig(svm, program, config);
 
-  let amountIn: BN;
-  if (configState.collectFeeMode == 0) {
-    // over 20%
-    amountIn = configState.migrationQuoteThreshold
-      .mul(new BN(6))
-      .div(new BN(5));
-  } else {
-    amountIn = configState.migrationQuoteThreshold;
-  }
   // swap
-  const params: SwapParams = {
-    config,
-    payer: user,
-    pool: virtualPool,
-    inputTokenMint: quoteMint,
-    outputTokenMint: virtualPoolState.baseMint,
-    amountIn,
-    minimumAmountOut: new BN(0),
-    swapMode: SwapMode.ExactIn,
-    referralTokenAccount: null,
-  };
-  await swap(svm, program, params);
+  // SPEC-DBC-AUDIT-001: graduate via many sub-5% buyers instead of a single
+  // `migrationQuoteThreshold` buy that would trip the holding cap. PartialFill
+  // ends at the threshold regardless of collectFeeMode. `admin` is the custom
+  // quote-mint authority used to fund each buyer.
+  await progressCurveToGraduation(svm, program, config, virtualPool, {
+    quoteMintAuthority: admin,
+  });
 
   virtualPoolState = getVirtualPool(svm, program, virtualPool);
 

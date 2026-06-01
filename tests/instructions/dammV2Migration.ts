@@ -25,24 +25,18 @@ export type CreateMeteoraDammV2Metadata = {
 };
 
 export async function createMeteoraDammV2Metadata(
-  svm: LiteSVM,
-  program: VirtualCurveProgram,
-  params: CreateMeteoraDammV2Metadata
+  _svm: LiteSVM,
+  _program: VirtualCurveProgram,
+  _params: CreateMeteoraDammV2Metadata
 ): Promise<any> {
-  const { payer, virtualPool, config } = params;
-  const migrationMetadata = deriveMigrationDammV2MetadataAddress(virtualPool);
-  const transaction = await program.methods
-    .migrationDammV2CreateMetadata()
-    .accountsPartial({
-      virtualPool,
-      config,
-      migrationMetadata,
-      payer: payer.publicKey,
-      systemProgram: SystemProgram.programId,
-    })
-    .transaction();
-
-  sendTransactionMaybeThrow(svm, transaction, [payer]);
+  // SPEC-DBC-AUDIT-001: migration_damm_v2_create_metadata was DELETED. The
+  // `migration_metadata` account on migration_damm_v2 is now a deprecated,
+  // UNUSED UncheckedAccount (see migrate_damm_v2_initialize_pool.rs: "Deprecated.
+  // Unused anymore."). There is no metadata to pre-create, so this is a no-op.
+  // Kept as an exported no-op so the many existing call sites compile and run
+  // unchanged during the foundation pass; remove the call sites in the
+  // coverage-expansion pass.
+  return;
 }
 
 export type MigrateMeteoraDammV2Params = {

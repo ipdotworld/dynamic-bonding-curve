@@ -14,7 +14,15 @@ no-idl = []
 no-log-ix-name = []
 cpi = ["no-entrypoint"]
 default = []
+# `local`: admin-auth bypass for the test pipeline ONLY (assert_eq_admin -> true).
+# The test build is `anchor build -p dynamic_bonding_curve -- --features local`.
 local = []
+# `production`: SPEC-DBC-AUDIT-001 Phase 4 (REQ-D-002 / SEC-CORE-04). Explicit
+# deploy signal — set ONLY for a real deploy build, NEVER by the test pipeline.
+# Enabling `local` and `production` together is a compile error (see admin/auth.rs),
+# so the test-only admin bypass can never leak into a deployed binary. A safe deploy
+# build is `anchor build -p dynamic_bonding_curve -- --features production` (no local).
+production = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
@@ -27,17 +35,18 @@ ruint = { workspace = true }
 num-traits = "0.2.19"
 num_enum = "0.7.0"
 num = "0.4.3"
-mpl-token-metadata = "5.1.0"
 spl-token-metadata-interface = "0.6"
-dynamic-amm = { path = "../../libs/dynamic-amm" }
 damm-v2 = { path = "../../libs/damm-v2" }
 locker = { path = "../../libs/locker" }
-protocol-zap = { git = "https://github.com/MeteoraAg/zap-program", rev = "064c58b317b9a85f212c0de72caea286fc72fdb4" }
 unchecked_account = { git = "https://github.com/MeteoraAg/anchor-patches.git", rev = "ed053964b49b2832beb9891be0f5b353e2317777" }
 spl-transfer-hook-interface = "0.9"
 spl-tlv-account-resolution = "0.9"
-# SPEC-DBC-004 Phase 6 (REQ-I-003): IP owner fee → vesting vault via CPI.
-ip-owner-vault = { path = "../ip-owner-vault", features = ["cpi"] }
+# SPEC-DBC-AUDIT-001 Phase 3 (REQ-E-002, OQ-4): single source of truth for the
+# ipworld-hook program id. DBC re-exports `ipworld_hook::ID` (the hook's own
+# `declare_id!`) so the two can never diverge. No `cpi` feature: DBC hand-builds
+# the hook `Instruction` (manual discriminator) and only needs the `ID` const.
+# `no-entrypoint` so the hook's entrypoint is not linked into the DBC binary.
+ipworld-hook = { path = "../ipworld-hook", features = ["no-entrypoint"] }
 
 [dev-dependencies]
 proptest = "1.2.0"

@@ -6,6 +6,7 @@ import {
   createLocker,
   createPoolWithSplToken,
   partnerWithdrawSurplus,
+  progressCurveToGraduation,
   swap,
   SwapMode,
   SwapParams,
@@ -109,18 +110,6 @@ describe("Swap Over the Curve", () => {
     };
     let config = await createConfig(svm, program, params);
     let configState = getConfig(svm, program, config);
-    let swapAmount = instructionParams.migrationQuoteThreshold
-      .mul(new BN(120))
-      .div(new BN(100)); // swap more 20%
-
-    mintSplTokenTo(
-      svm,
-      user,
-      quoteMint,
-      admin,
-      user.publicKey,
-      swapAmount.toNumber()
-    );
 
     // create pool
     let virtualPool = await createPoolWithSplToken(svm, program, {
@@ -137,18 +126,12 @@ describe("Swap Over the Curve", () => {
     let virtualPoolState = getVirtualPool(svm, program, virtualPool);
 
     // swap
-    const swapParams: SwapParams = {
-      config,
-      payer: user,
-      pool: virtualPool,
-      inputTokenMint: quoteMint,
-      outputTokenMint: virtualPoolState.baseMint,
-      amountIn: swapAmount,
-      minimumAmountOut: new BN(0),
-      swapMode: SwapMode.PartialFill,
-      referralTokenAccount: null,
-    };
-    await swap(svm, program, swapParams);
+    // SPEC-DBC-AUDIT-001: graduate (and swap "over the curve") via many sub-5%
+    // buyers instead of a single threshold*1.2 buy that would trip the holding
+    // cap. PartialFill stops at the threshold; `admin` mints quote to each buyer.
+    await progressCurveToGraduation(svm, program, config, virtualPool, {
+      quoteMintAuthority: admin,
+    });
 
     // migrate
     const poolAuthority = derivePoolAuthority();

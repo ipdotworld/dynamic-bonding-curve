@@ -9,7 +9,7 @@ use crate::{
     constants::{
         fee::{
             FEE_DENOMINATOR, HOST_FEE_PERCENT, MAX_BASIS_POINT, MAX_FEE_NUMERATOR,
-            PROTOCOL_FEE_PERCENT, PROTOCOL_POOL_CREATION_FEE_PERCENT,
+            PROTOCOL_FEE_PERCENT,
         },
         MAX_CURVE_POINT_CONFIG, MAX_SQRT_PRICE, SWAP_BUFFER_PERCENTAGE,
     },
@@ -22,7 +22,7 @@ use crate::{
         liquidity_distribution::{get_base_token_for_swap, LiquidityDistributionParameters},
         swap::TradeDirection,
     },
-    safe_math::{SafeCast, SafeMath},
+    safe_math::SafeMath,
     u128x128_math::Rounding,
     utils_math::{safe_mul_div_cast_u128, safe_mul_div_cast_u64},
     LockedVestingParams, MigratedPoolMarketCapFeeSchedulerParams, MigrationFee, PoolError,
@@ -510,14 +510,12 @@ pub struct PoolConfig {
     pub ip_owner_share: u32,
     /// IPWorld fee share: airdrop (UGC+Holder) share of quote fee (SELL side), in FEE_SHARE_PRECISION units
     pub airdrop_share: u32,
-    /// IPWorld fee share: referral share of quote fee (SELL side), in FEE_SHARE_PRECISION units
-    pub referral_share: u32,
-    /// Padding (formerly `creator_share: u32`, removed in SPEC-DBC-004 Phase 3 — REQ-I-001).
-    /// Retained as 4-byte zero-pad so `swap_base_amount: u64` keeps its
-    /// 8-byte alignment (Pod / zero_copy requirement). On-chain layout for the
-    /// post-`creator_share` portion is preserved; PoolConfig::INIT_SPACE remains
-    /// at the pre-Phase-3 value (1008).
-    pub _padding_creator_share: [u8; 4],
+    /// Padding (formerly `creator_share: u32` removed in SPEC-DBC-004 Phase 3 — REQ-I-001,
+    /// then `referral_share: u32` removed in SPEC-DBC-AUDIT-001 Phase 8 — REQ-A-005).
+    /// Retained as an 8-byte zero-pad (4 B for each removed `u32`) so the following
+    /// `swap_base_amount: u64` keeps its 8-byte alignment (Pod / zero_copy requirement)
+    /// and every later field offset is unchanged. PoolConfig::INIT_SPACE remains 1008.
+    pub _padding_creator_share: [u8; 8],
     /// Collect fee mode
     pub collect_fee_mode: u8,
     /// migration option
@@ -752,7 +750,6 @@ impl PoolConfig {
         enable_creator_first_swap_with_min_fee: u8,
         ip_owner_share: u32,
         airdrop_share: u32,
-        referral_share: u32,
         token_airdrop_share: u32,
     ) -> Result<()> {
         self.version = 0;
@@ -808,11 +805,11 @@ impl PoolConfig {
 
         self.enable_first_swap_with_min_fee = enable_creator_first_swap_with_min_fee;
 
-        // IPWorld flat fee distribution shares (4-way SELL: ip_owner, airdrop, referral, treasury)
-        // — `creator_share` removed in SPEC-DBC-004 Phase 3 (REQ-I-001).
+        // IPWorld flat fee distribution shares (SELL side: ip_owner, airdrop, treasury remainder).
+        // `creator_share` removed in SPEC-DBC-004 Phase 3 (REQ-I-001);
+        // `referral_share` removed in SPEC-DBC-AUDIT-001 Phase 8 (REQ-A-005).
         self.ip_owner_share = ip_owner_share;
         self.airdrop_share = airdrop_share;
-        self.referral_share = referral_share;
         self.token_airdrop_share = token_airdrop_share;
 
         for i in 0..curve.len() {
@@ -957,17 +954,6 @@ impl PoolConfig {
             partner_fee,
             creator_fee,
         })
-    }
-
-    pub fn split_pool_creation_fee(&self) -> Result<(u64, u64)> {
-        let protocol_fee = safe_mul_div_cast_u64(
-            self.pool_creation_fee,
-            PROTOCOL_POOL_CREATION_FEE_PERCENT.into(),
-            100,
-            Rounding::Down,
-        )?;
-        let partner_fee = self.pool_creation_fee.safe_sub(protocol_fee)?;
-        Ok((protocol_fee, partner_fee))
     }
 
     pub fn get_total_liquidity_locked_bps_at_n_seconds(&self, n_seconds: u64) -> Result<u16> {
@@ -1146,34 +1132,6 @@ impl PoolConfig {
 pub struct PartnerAndCreatorSplitFee {
     pub partner_fee: u64,
     pub creator_fee: u64,
-}
-
-// damm v1 dont has vesting
-pub struct LiquidityDistributionDammv1 {
-    pub partner_locked_liquidity: u64,
-    pub partner_liquidity: u64,
-    pub creator_locked_liquidity: u64,
-    pub creator_liquidity: u64,
-}
-
-pub struct LiquidityDistribution {
-    pub partner: LiquidityDistributionItem,
-    pub creator: LiquidityDistributionItem,
-}
-
-impl LiquidityDistribution {
-    pub fn to_liquidity_distribution_damm_v1(&self) -> Result<LiquidityDistributionDammv1> {
-        let partner_locked_liquidity = self.partner.permanent_locked_liquidity.safe_cast()?;
-        let partner_liquidity = self.partner.unlocked_liquidity.safe_cast()?;
-        let creator_locked_liquidity = self.creator.permanent_locked_liquidity.safe_cast()?;
-        let creator_liquidity = self.creator.unlocked_liquidity.safe_cast()?;
-        Ok(LiquidityDistributionDammv1 {
-            partner_locked_liquidity,
-            partner_liquidity,
-            creator_locked_liquidity,
-            creator_liquidity,
-        })
-    }
 }
 
 pub struct LiquidityDistributionItem {

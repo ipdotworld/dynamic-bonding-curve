@@ -21,8 +21,12 @@ export const DAMM_V2_PROGRAM_ID = new PublicKey(
   "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
 );
 
+// SPEC-DBC-AUDIT-001 Phase 3: must match the hook program's `declare_id!`
+// ("7WDGrF...") and Anchor.toml [programs.localnet].ipworld_hook. The DBC program
+// embeds this real ID for its transfer-hook CPI, so deploying the hook .so at the
+// old "HooK1111..." placeholder made every hook CPI fail with program-not-found.
 export const IPWORLD_HOOK_PROGRAM_ID = new PublicKey(
-  "HooK1111111111111111111111111111111111111111"
+  "7WDGrFPSEQjh42aLrzDkqWu6RTCeDYJeTRErKDQDLiC1"
 );
 
 // SPEC-DBC-004 Phase 6 (REQ-I-003): IP owner vesting vault program ID.

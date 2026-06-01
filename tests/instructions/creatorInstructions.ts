@@ -156,8 +156,9 @@ export async function creatorWithdrawMigrationFee(
     unrapSOLIx && postInstructions.push(unrapSOLIx);
   }
 
+  // SPEC-DBC-AUDIT-001: withdraw_migration_fee no longer takes a flag arg.
   const transaction = await program.methods
-    .withdrawMigrationFee(1)
+    .withdrawMigrationFee()
     .accountsPartial({
       poolAuthority,
       config: poolState.config,

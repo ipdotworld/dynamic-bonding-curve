@@ -4,7 +4,7 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 
-use crate::constants::VESTING_VAULT_SEED;
+use crate::constants::{derive_pool_authority, VESTING_VAULT_SEED};
 use crate::error::VaultError;
 use crate::state::Vault;
 
@@ -46,11 +46,24 @@ pub struct DistributeToVaultCtx<'info> {
     )]
     pub vault_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    /// Authority over `source_token_account` (PDA or wallet). Anchor inherits
-    /// signer status from the parent CPI for PDA authorities — see module doc.
-    /// CHECK: arbitrary AccountInfo because it may be a PDA owned by another
-    /// program; signer enforcement happens at the SPL `transfer_checked` level.
+    /// Authority over `source_token_account`. MUST be DBC's `pool_authority`
+    /// PDA (enforced in the handler, SEC-P2-01). `transfer_checked` additionally
+    /// requires it to be a transaction signer, and only DBC can sign as
+    /// `pool_authority` (via `invoke_signed`), so the deposit path is reachable
+    /// ONLY through DBC's gated `claim_ip_owner_fee` CPI. This is what makes the
+    /// pool recorded on the first deposit trustworthy.
+    /// CHECK: equality against the derived `pool_authority` PDA is enforced in
+    /// `handle_distribute_to_vault`; signer status is enforced by SPL transfer.
     pub authority: AccountInfo<'info>,
+
+    /// The DBC `VirtualPool` whose `ip_owner_quote_fee` is being distributed.
+    ///
+    /// SPEC-DBC-AUDIT-001 Phase 2 (SEC-P2-01): bound into `vault.pool` on the
+    /// first deposit and required to match on every subsequent deposit, so the
+    /// vault is tied to exactly one authorizing pool. Threaded through from DBC's
+    /// `claim_ip_owner_fee` (which already gates on `TokenVerification[pool]`).
+    /// CHECK: only its key is recorded/compared; no data is read here.
+    pub pool: UncheckedAccount<'info>,
 
     /// Pays for `init_if_needed` of `vault` + `vault_token_account`.
     #[account(mut)]
@@ -75,9 +88,23 @@ pub fn handle_distribute_to_vault(
 ) -> Result<()> {
     require_gt!(amount, 0, VaultError::AmountIsZero);
 
+    // SPEC-DBC-AUDIT-001 Phase 2 (SEC-P2-01): gate the deposit to DBC's
+    // `pool_authority` PDA. Combined with the SPL transfer's signer requirement
+    // (only DBC can `invoke_signed` as `pool_authority`), this guarantees the
+    // funding path — and therefore the `vault.pool` recorded below — is reachable
+    // only via DBC's `claim_ip_owner_fee` CPI, which itself gates on
+    // `TokenVerification[pool].ip_owner`. A permissionless direct caller can no
+    // longer poison `vault.pool` by front-running the first deposit.
+    require_keys_eq!(
+        ctx.accounts.authority.key(),
+        derive_pool_authority(),
+        VaultError::InvalidDistributeAuthority
+    );
+
     let now = Clock::get()?.unix_timestamp;
     let vault_bump = ctx.bumps.vault;
     let token_mint_key = ctx.accounts.token_mint.key();
+    let pool_key = ctx.accounts.pool.key();
 
     // ── Phase A: scoped vault mut-borrow (drops before CPI) ──────────────────
     {
@@ -93,6 +120,11 @@ pub fn handle_distribute_to_vault(
         } else {
             require_keys_eq!(vault.token_mint, token_mint_key, VaultError::MintMismatch);
         }
+
+        // SEC-P2-01: record the authorizing pool on first deposit; require it to
+        // match on every subsequent deposit (rejects a second pool — e.g. an
+        // attacker's pool sharing the same quote mint — from commingling funds).
+        vault.bind_or_check_pool(pool_key)?;
 
         vault.stamp_clock_on_first_deposit(now);
         vault.add_deposit(amount)?;

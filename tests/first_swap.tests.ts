@@ -204,7 +204,7 @@ async function createSwapIx(
   }
 
   const tx = await program.methods
-    .swap2({
+    .swap({
       amount0: amountIn,
       amount1: new BN(0),
       swapMode: 0,

@@ -18,7 +18,10 @@ use crate::{
     params::swap::TradeDirection,
     safe_math::SafeMath,
     state::{
-        fee::{distribute_base_fee, distribute_quote_fee, FeeMode, FeeOnAmountResult, VolatilityTracker},
+        fee::{
+            distribute_base_fee, distribute_quote_fee, FeeMode, FeeOnAmountResult,
+            VolatilityTracker, AIRDROP_SHARE, IP_OWNER_SHARE, TOKEN_AIRDROP_SHARE,
+        },
         PoolConfig,
     },
     u128x128_math::Rounding,
@@ -106,7 +109,11 @@ pub struct VirtualPool {
     pub base_reserve: u64,
     /// quote reserve
     pub quote_reserve: u64,
-    /// protocol base fee
+    /// Protocol base fee accumulator. SPEC-DBC-AUDIT-001 Phase 8: no longer
+    /// credited (REQ-A-001 removed the BUY double-write) nor claimed (the dead
+    /// trading leg of `claim_protocol_base_fee` was removed). Retained as a
+    /// reserved `u64` slot to preserve the `zero_copy` layout / INIT_SPACE; it is
+    /// permanently 0 on every live path (asserted by characterization tests).
     pub protocol_base_fee: u64,
     /// protocol quote fee
     pub protocol_quote_fee: u64,
@@ -931,27 +938,36 @@ impl VirtualPool {
 
         if fee_mode.fees_on_base_token {
             // BUY (SOL→token): base_fee distribution
-            // token_airdrop_share% → token_airdrop_base_fee counter
-            // remainder           → ip_treasury_base_fee counter
+            // TOKEN_AIRDROP_SHARE (40%) → token_airdrop_base_fee counter
+            // remainder (60%)           → ip_treasury_base_fee counter
             // SPEC-DBC-004 Phase 2 (REQ-S-005): inline math relocated to
             // `state::fee::distribute_base_fee`.
+            // SPEC-DBC-AUDIT-001 Phase 1 (REQ-A-006): share is now the fixed
+            // program constant `TOKEN_AIRDROP_SHARE` instead of the mutable
+            // per-pool `config.token_airdrop_share`. Changing it requires a
+            // program upgrade and applies only to fees accrued afterwards.
             let (token_airdrop, ip_treasury) =
-                distribute_base_fee(total_fee, config.token_airdrop_share)?;
+                distribute_base_fee(total_fee, TOKEN_AIRDROP_SHARE)?;
 
+            // SPEC-DBC-AUDIT-001 Phase 1 (REQ-A-001): the BUY base fee accrues
+            // ONLY to these two sinks, each counted exactly once. The previous
+            // `protocol_base_fee += total_fee` write was a double-count: it made
+            // the migration non-burnable reserve (computed via
+            // `get_protocol_and_trading_base_fee`) overstate the held base fees.
+            // The accessor now sums these two sinks directly (REQ-A-002), so the
+            // canonical counter is removed here.
             self.token_airdrop_base_fee = self.token_airdrop_base_fee.safe_add(token_airdrop)?;
             self.ip_treasury_base_fee = self.ip_treasury_base_fee.safe_add(ip_treasury)?;
 
-            // Keep protocol_base_fee as the canonical "all protocol base fees" counter for
-            // backward-compatible withdrawal paths (claim_protocol_base_fee).
-            self.protocol_base_fee = self.protocol_base_fee.safe_add(total_fee)?;
-
             self.metrics.accumulate_fee(total_fee, 0, true)?;
         } else {
-            // SELL (token→SOL): quote_fee distribution (IPWorld 4-way SELL model)
+            // SELL (token→SOL): quote_fee distribution (IPWorld SELL model)
             // ip_owner_share%   → ip_owner_quote_fee counter
             // airdrop_share%    → airdrop_quote_fee counter
-            // referral_share%   → handled externally via swap_result.referral_fee (immediate transfer)
             // remainder         → protocol_quote_fee counter (IPWorld treasury)
+            // Any referral cut is handled externally via swap_result.referral_fee
+            // (immediate transfer, driven by `pool_fees`/`has_referral` — NOT by a
+            // config `referral_share` field, which was removed in REQ-A-005).
             // SPEC-DBC-004 Phase 2 (REQ-S-005): inline math relocated to
             // `state::fee::distribute_quote_fee`.
             // SPEC-DBC-004 Phase 3 (REQ-I-001): `creator_share` removed; the
@@ -964,10 +980,16 @@ impl VirtualPool {
             // referral portion among the on-chain counters.
             let distributable = total_fee.safe_sub(referral_fee)?;
 
+            // SPEC-DBC-AUDIT-001 Phase 1 (REQ-A-006): shares are now the fixed
+            // program constants `IP_OWNER_SHARE` (10%) and `AIRDROP_SHARE` (10%)
+            // instead of mutable per-pool `config.ip_owner_share` /
+            // `config.airdrop_share`. Treasury receives the residual (80% of the
+            // post-referral distributable). Changing these requires a program
+            // upgrade and affects only fees accrued afterwards.
             let (ip_owner, airdrop, treasury) = distribute_quote_fee(
                 distributable,
-                config.ip_owner_share,
-                config.airdrop_share,
+                IP_OWNER_SHARE,
+                AIRDROP_SHARE,
             )?;
 
             self.ip_owner_quote_fee = self.ip_owner_quote_fee.safe_add(ip_owner)?;
@@ -1040,18 +1062,17 @@ impl VirtualPool {
     }
 
     pub fn claim_protocol_base_fee(&mut self, max_amount: u64) -> Result<u64> {
-        // try to claim from trading fees firstly
-        let trading_claimed_fee = self.protocol_base_fee.min(max_amount);
-        self.protocol_base_fee = self.protocol_base_fee.safe_sub(trading_claimed_fee)?;
-        let max_amount = max_amount.safe_sub(trading_claimed_fee)?;
-        // claim from migration fee
+        // SPEC-DBC-AUDIT-001 Phase 8 (F-001): the trading-fee leg was removed.
+        // After REQ-A-001 the BUY base-fee double-write to `protocol_base_fee` is
+        // gone, so `protocol_base_fee` is permanently 0 on the trading path and
+        // its claim leg was dead (always claimed 0). Only the migration base fee
+        // is claimable here.
         let migration_claimed_fee = self.protocol_migration_base_fee_amount.min(max_amount);
         self.protocol_migration_base_fee_amount = self
             .protocol_migration_base_fee_amount
             .safe_sub(migration_claimed_fee)?;
-        let total_claimed_fee = trading_claimed_fee.safe_add(migration_claimed_fee)?;
 
-        Ok(total_claimed_fee)
+        Ok(migration_claimed_fee)
     }
 
     fn claim_protocol_quote_fee(&mut self, max_amount: u64) -> Result<u64> {
@@ -1098,11 +1119,24 @@ impl VirtualPool {
     // (creator_share = 0 implicit); creator earnings flow exclusively via the
     // existing `creator_withdraw_surplus` path.
 
-    /// Returns total base fees that must remain in the vault and cannot be migrated.
-    /// Post Phase 3 (REQ-I-001): only `protocol_base_fee` is accumulated; the
-    /// partner-deprecated and creator-deprecated terms have both been removed.
+    /// Returns the total accumulated BUY base fees that must remain in the vault
+    /// and cannot be migrated (the migration "non-burnable" reserve).
+    ///
+    /// SPEC-DBC-AUDIT-001 Phase 1 (REQ-A-002): this restores the original DBC
+    /// pattern where the non-burnable reserve equals the SUM of all base-fee
+    /// sinks. After REQ-A-001 removed the `protocol_base_fee += total_fee`
+    /// double-write in `apply_swap_result`, the BUY base fee accrues only to
+    /// `token_airdrop_base_fee` and `ip_treasury_base_fee`. Summing those two
+    /// here (single-counted) is what keeps accumulated BUY base fees out of the
+    /// graduation burn so they stay claimable. Returning the old
+    /// `protocol_base_fee` (now permanently 0 on the trading path) would
+    /// under-count the reserve and cause those fees to be BURNED at migration
+    /// (the Meteora/Offside-Labs vulnerability class). REQ-A-001 and REQ-A-002
+    /// are therefore a single atomic fix.
     pub fn get_protocol_and_trading_base_fee(&self) -> Result<u64> {
-        Ok(self.protocol_base_fee)
+        Ok(self
+            .token_airdrop_base_fee
+            .safe_add(self.ip_treasury_base_fee)?)
     }
 
     pub fn is_curve_complete(&self, migration_threshold: u64) -> bool {
@@ -1292,4 +1326,164 @@ pub struct SwapAmountFromInput {
     amount_left: u64,
     output_amount: u64,
     next_sqrt_price: u128,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::fee::{AIRDROP_SHARE, IP_OWNER_SHARE, TOKEN_AIRDROP_SHARE};
+
+    // =========================================================================
+    // SPEC-DBC-AUDIT-001 Phase 1 — fund-accounting fix (SEC-CORE-01)
+    //
+    // These tests drive the REAL `apply_swap_result` so the BUY case exercises
+    // the exact code path where the removed `protocol_base_fee += total_fee`
+    // double-write lived (REQ-A-001). They use `*::default()` for PoolConfig
+    // (dynamic fee disabled => `update_post_swap` is a no-op) and VirtualPool.
+    // =========================================================================
+
+    /// Builds a `FeeMode` directly (fields are pub) for a given side.
+    fn fee_mode(fees_on_base_token: bool) -> FeeMode {
+        FeeMode {
+            fees_on_input: false,
+            fees_on_base_token,
+            has_referral: false,
+        }
+    }
+
+    /// BUY (QuoteToBase) base-fee accrual must single-count into the two base
+    /// sinks and must NOT touch `protocol_base_fee` (REQ-A-001). Also asserts the
+    /// non-burnable reserve accessor returns the sum of the two sinks (REQ-A-002).
+    #[test]
+    fn test_buy_base_fee_single_counts_and_leaves_protocol_base_fee_zero() {
+        let config = PoolConfig::default();
+        let mut pool = VirtualPool::default();
+        // Seed base_reserve so the QuoteToBase output subtraction cannot underflow.
+        pool.base_reserve = 1_000_000;
+
+        // total_fee = protocol_fee + trading_fee + referral_fee = 1000.
+        let total_fee = 1_000u64;
+        let swap_result = SwapResult {
+            actual_input_amount: 5_000,
+            output_amount: 0,
+            next_sqrt_price: pool.sqrt_price, // unchanged => trivial post-swap update
+            trading_fee: 400,
+            protocol_fee: 600,
+            referral_fee: 0,
+        };
+
+        pool.apply_swap_result(
+            &config,
+            &swap_result,
+            &fee_mode(true), // BUY: fees_on_base_token = true
+            TradeDirection::QuoteToBase,
+            0,
+        )
+        .unwrap();
+
+        // Fixed 40/60 split (REQ-A-006).
+        assert_eq!(pool.token_airdrop_base_fee, 400);
+        assert_eq!(pool.ip_treasury_base_fee, 600);
+
+        // Single-counting: the two sinks sum to exactly total_fee.
+        assert_eq!(
+            pool.token_airdrop_base_fee + pool.ip_treasury_base_fee,
+            total_fee
+        );
+
+        // REQ-A-001: the BUY base-fee path must NOT credit protocol_base_fee.
+        // This assertion FAILS against the pre-fix code (line ~946 set it to
+        // total_fee) — it is the RED proof for the double-write removal.
+        assert_eq!(
+            pool.protocol_base_fee, 0,
+            "BUY base fee must not accrue to protocol_base_fee (REQ-A-001 double-write)"
+        );
+
+        // REQ-A-002: non-burnable reserve == sum of the two base-fee sinks.
+        assert_eq!(
+            pool.get_protocol_and_trading_base_fee().unwrap(),
+            pool.token_airdrop_base_fee + pool.ip_treasury_base_fee
+        );
+    }
+
+    /// SELL (BaseToQuote) credits the quote sinks, never `protocol_base_fee`.
+    /// Confirms the Phase 1 finding: post-A-001, `protocol_base_fee` (the trading
+    /// accumulator) is never written by ANY swap path => permanently 0.
+    #[test]
+    fn test_sell_quote_fee_never_touches_protocol_base_fee() {
+        let config = PoolConfig::default();
+        let mut pool = VirtualPool::default();
+        // Seed quote_reserve so the BaseToQuote output subtraction cannot underflow.
+        pool.quote_reserve = 1_000_000;
+
+        let swap_result = SwapResult {
+            actual_input_amount: 5_000,
+            output_amount: 0,
+            next_sqrt_price: pool.sqrt_price,
+            trading_fee: 400,
+            protocol_fee: 600,
+            referral_fee: 0,
+        };
+
+        pool.apply_swap_result(
+            &config,
+            &swap_result,
+            &fee_mode(false), // SELL: fees_on_base_token = false
+            TradeDirection::BaseToQuote,
+            0,
+        )
+        .unwrap();
+
+        // SELL distributable = total_fee - referral_fee = 1000; 10/10/80 split.
+        assert_eq!(pool.ip_owner_quote_fee, 100);
+        assert_eq!(pool.airdrop_quote_fee, 100);
+        assert_eq!(pool.protocol_quote_fee, 800);
+
+        // protocol_base_fee is untouched by the SELL path (and by the BUY path
+        // after REQ-A-001) => permanently 0 on the trading side.
+        assert_eq!(pool.protocol_base_fee, 0);
+    }
+
+    /// Conservation / burn-survival property: after a BUY, the non-burnable
+    /// reserve (the accessor used by the migration burn math) equals exactly the
+    /// accumulated BUY base fees that must survive graduation — NOT zero.
+    /// A full migration/burn integration test belongs in the ts-mocha suite.
+    #[test]
+    fn test_non_burnable_reserve_covers_accumulated_buy_base_fees() {
+        let config = PoolConfig::default();
+        let mut pool = VirtualPool::default();
+        pool.base_reserve = 10_000_000;
+
+        // Accrue across two BUYs to confirm the accessor tracks the running sum.
+        for total in [1_000u64, 3_000u64] {
+            let swap_result = SwapResult {
+                actual_input_amount: total * 5,
+                output_amount: 0,
+                next_sqrt_price: pool.sqrt_price,
+                trading_fee: total / 2,
+                protocol_fee: total - total / 2,
+                referral_fee: 0,
+            };
+            pool.apply_swap_result(
+                &config,
+                &swap_result,
+                &fee_mode(true),
+                TradeDirection::QuoteToBase,
+                0,
+            )
+            .unwrap();
+        }
+
+        let reserve = pool.get_protocol_and_trading_base_fee().unwrap();
+
+        // Reserve must be non-zero (fees would otherwise be burned at migration).
+        assert_ne!(reserve, 0);
+        // Reserve == exactly airdrop + ip_treasury (the survive-the-burn amount),
+        // which for total accrued 4000 at the 40/60 split is 1600 + 2400 = 4000.
+        assert_eq!(reserve, pool.token_airdrop_base_fee + pool.ip_treasury_base_fee);
+        assert_eq!(reserve, 4_000);
+        // And it is NOT the stale protocol_base_fee (which is now 0).
+        assert_eq!(pool.protocol_base_fee, 0);
+        assert_ne!(reserve, pool.protocol_base_fee);
+    }
 }

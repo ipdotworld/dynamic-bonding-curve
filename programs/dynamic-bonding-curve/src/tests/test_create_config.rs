@@ -1,6 +1,6 @@
 use crate::{
     constants::MAX_SQRT_PRICE,
-    migration_handler::{CompoundingLiquidity, MigrationHandler},
+    migration_handler::{ConcentratedLiquidity, MigrationHandler},
     params::liquidity_distribution::{
         get_base_token_for_swap, get_migration_threshold_price, LiquidityDistributionParameters,
     },
@@ -27,7 +27,7 @@ fn test_create_config() {
     let swap_base_amount =
         get_base_token_for_swap(sqrt_start_price, migration_sqrt_price, &curve).unwrap();
 
-    let liquidity_handler = CompoundingLiquidity {
+    let liquidity_handler = ConcentratedLiquidity {
         migration_sqrt_price,
     };
     let (migration_base_amount, migration_quote_amount) = liquidity_handler
